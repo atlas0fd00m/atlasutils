@@ -1,0 +1,32 @@
+#!/usr/bin/env python
+import atlasutils.vtraceutils
+from sys import *
+
+"""
+LiveOrganTransplant is used for dumping raw bytes out of a running process 
+"""
+
+from atlasutils.vtraceutils import *
+
+if __name__ == "__main__":
+    PID = None
+    MEMLOC = None
+    COUNT = None
+    style = None
+    
+    for i in range(len(argv)-1):
+        parm = argv.pop(1)
+        if parm == '-i':
+            style = LOT_INSTRUCTIONOUTPUT
+        elif parm == "-s":
+            style = LOT_STRINGOUTPUT
+        elif parm == "-x":
+            style = LOT_HEXOUTPUT
+        elif not PID:
+            PID = int(parm)
+        elif not MEMLOC:
+            MEMLOC = parm
+        elif not COUNT:
+            COUNT = parm
+    print liveOrganTransplant(PID, MEMLOC, COUNT, style)
+

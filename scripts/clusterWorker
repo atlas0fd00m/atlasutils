@@ -1,0 +1,53 @@
+#!/usr/bin/python
+
+import argparse
+#import subprocess
+import multiprocessing
+import cobra.cluster as ccluster
+
+''' 
+this script depends wholely on invisigoth's Cobra networking framework.
+you can get cobra from the VDB project at http://visi.kenshoto.com/releases
+
+**************************************************************************************************************************
+* WARNING * there is no authentication or security of ANY form!  keep this only on a trusted network.  
+**************************************************************************************************************************
+there is *NOTHING* to keep an evil ClusterServer from serving up something that erases your harddrive or exfils your data!
+**************************************************************************************************************************
+'''
+
+#def main(workname, worker=False):
+    #workerccluster
+    
+subprocs = []
+if __name__ == '__main__':
+    desc = "worker for all your hacking-clustery needs"
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-W', '--worker', help='-internal use-', default=False, action='store_true')
+    parser.add_argument('-w', '--worksetname', help='name of the workset (broadcast by ClusterServer)', default="*")
+    parser.add_argument('-n', '--numprocs', help='number of cores/processors in the machine you wish to use (number of python processes)', default=multiprocessing.cpu_count())
+    
+    args = parser.parse_args()
+    
+    #if args.worker:
+    print "doing work"
+    worker = ccluster.ClusterClient(args.worksetname, maxwidth=args.numprocs, docode=True)
+    worker.processWork()
+        
+        
+        
+    #else:
+        #child = sys.argv[0]
+        #for spawner in range( args.numprocs ):
+            #subprocs.append( subprocess.Popen( child + " %s"%(args.worksetname) + " -W" ) ) 
+            
+        ## now we just sleep while our children do all the work
+        #while True:
+            #sleep(1000)
+            #if not len(subprocs):
+                #break
+
+            
+            
+            
+    

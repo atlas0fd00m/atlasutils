@@ -1,0 +1,28 @@
+#!/usr/bin/python -d
+
+#   ./genshell [--list | shellname ...]
+#  genshell spits shellcode onto stdout.  the shellcode will be pulled out of hacklib.py
+#
+import atlasutils.hacklib as hl
+import sys
+
+if (len(sys.argv) < 2):
+  print("""Syntax:	genShell <shellname> <size> <front> 
+	genShell --list
+
+		<shellname> is the name of the shell you want to use (see --list)
+		<size> is the byte length of the desired shell/NOP combination
+		<front> is how many of those NOPs belong in the front of the payload
+		--list   displays the list of shells currently in the hacklib 
+			(since hacklib is *yours* to do with as you please)
+""");
+  sys.exit(1)
+
+if (sys.argv[1].lower() == "--list"):
+  print("Available shells:")
+  for shel in hl.SHELLS.keys():
+    print(" " + shel)
+  print("\n\n")
+else:
+#print( hacklib.genShell1('bsd-ebp-forward'));
+  sys.stdout.write(hl.genShellbyarray(sys.argv))

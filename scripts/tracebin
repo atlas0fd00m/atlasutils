@@ -1,0 +1,22 @@
+#!/usr/bin/python -i
+
+from atlasutils.vtraceutils.tracebin import *
+import os,time,sys
+
+try:
+    from pefile import *
+except:
+    from Elf import *
+
+
+if __name__ == "__main__":
+    starttime = time.time()
+    try:
+        tb = tracebin(argv)
+        tb.go()
+    except:
+        x,y,z = sys.exc_info()
+        sys.excepthook(x,y,z)
+    stoptime = time.time()
+
+    print ("Elapsed Time: %d seconds"%(stoptime-starttime))

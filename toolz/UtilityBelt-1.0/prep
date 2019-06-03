@@ -1,0 +1,2 @@
+SHELLCODE=`~/genshell.pl 1`
+export SHELLCODE

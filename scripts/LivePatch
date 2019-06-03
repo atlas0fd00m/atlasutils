@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+from atlasutils.vtraceutils import *
+from atlasutils.smartprint import *
+from sys import *
+
+
+"""
+Live Patch a program that modifies raw bytes in a running process with bytes from stdin
+"""
+
+
+def livePatch(pid, memloc, file):
+    buffer = file.read()
+    buflen = len(buffer)
+    me = getTrace()
+    print >>stderr,("Attaching to PID %d..."%pid)
+    me.attach(pid)
+    savebuffer = me.readMemory(memloc,buflen)
+    print >>stderr,("Replacing %d bytes at memory address %x:\n%s"%(buflen,memloc,SmartOutput(savebuffer,10)))
+    me.writeMemory(memloc, buffer)
+    print >>stderr,("Writing %d bytes at memory address %x..."%(buflen,memloc))
+    me.writeMemory(memloc, buffer)
+    print >>stderr,("Completed Successfully\n")
+
+
+if __name__ == "__main__":
+    PID = None
+    MEMLOC = None
+    COUNT = None
+    style = None
+    
+    for i in range(len(argv)-1):
+        parm = argv.pop(1)
+        if not PID:
+            PID = int(parm)
+        elif not MEMLOC:
+            if parm[1] == 'x':
+                MEMLOC = int(parm,16)
+            else:
+                MEMLOC = parm
+    if PID != None and MEMLOC != None:
+        livePatch(PID, MEMLOC, stdin)
+    else:
+        print >>stderr,"""
+Syntax:  %s <pid> <memloc>
+		where <pid> is the process id to be patched
+		and <memloc> is the virtual address to start patching from
+"""
+        exit(1)

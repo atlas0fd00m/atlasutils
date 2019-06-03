@@ -1,0 +1,28 @@
+#!/bin/bash
+#
+# grabnewchildren  - (and GDB wrapper)
+#  This script takes one argument, the name for a running service name
+#  Some services fork a new child for each incoming request.  GDB does not always follow
+#  the child correctly.  It is necessary in these cases to connect to the service, then
+#  connect GDB to the new child process.  
+#
+#  grabnewchildren attempts to alleviate some of this pain by watching for new children
+#  and immediately starting gdb against them.  It does this by searching for any process
+#  matching the process name when you start it, and ignoring them.  Every second thereafter 
+#  grabnewchildren checks for "fresh meat".  If another process has been started which
+#  matches the process name, gdb is started and attached to it.
+
+
+
+process="$1"
+IGNORE='('$$` ps ax | grep "$process" | while read PID STUFF; do echo -n "|$PID" ;done`')'
+
+while true; do
+  NEWPID=`ps ax |grep "$process" | egrep -v '(grep|newchildren)' |egrep -v "$IGNORE" |cut -c-6`
+  if [ "$NEWPID" ]; then
+    echo "vtraceme \"$process\" $NEWPID"
+    vtraceme $NEWPID
+  fi
+  echo "$IGNORE"
+  sleep .1
+done

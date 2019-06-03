@@ -1,0 +1,25 @@
+#!/usr/bin/python
+import sys
+from atlasutils.ascii2binary import *
+
+"""
+converts ascii text into binary 0's and 1's.  eg. "A" becomes "01000001"
+intended for use inline using stdin/stdout
+"""
+
+ascii = None
+if (len(sys.argv) > 1):
+	if (sys.argv[1] == "--test"):
+		ascii = "HELLO"
+	elif (sys.argv[1] == "--help" or sys.argv[1] == "-h"):
+		printSyntax()
+	else:
+		ascii = sys.argv[1]
+	print(ascii2binary(ascii))
+else:
+	inp = sys.stdin.read()
+	try:
+		sys.stdout.write(ascii2binary(inp))
+	except:
+		print >>sys.stderr,("Problems in line %s.  Not binary?  Should look like '011011001010111101010011'"%line)
+

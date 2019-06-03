@@ -1,0 +1,62 @@
+if $(RELEASE_BUILD) = 1 {
+    TARGET = Release ;
+} else {
+    TARGET = Debug ;
+    SUFLIB = d$(SUFLIB) ; # add d to end of filenames
+    SUFDLL = d$(SUFDLL) ;
+}
+
+rule SetVar { ## usage: SetVar VAR on target : stuff ;
+    makeGristedName targ : $(<[3]) ;
+    $(<[1]) on $(targ) = $(>) ;
+}
+rule AddVar { ## usage: AddVar VAR on target : stuff ;
+    makeGristedName targ : $(<[3]) ;
+    $($<[1]) += $(>) ;
+}
+
+CCFLAGS += /X ;
+C++FLAGS += /X ;
+
+HDRS += "c:\\PROGRA~1\\MIFD68~1\\Include\\prerelease" ;
+HDRS += "c:\\PROGRA~1\\MIFD68~1\\Include" ;
+STDLINKDIRS = "/LIBPATH:c:\\PROGRA~1\\MIFD68~1\\Lib\\prerelease $(STDLINKDIRS)" ;
+STDLINKDIRS = "/LIBPATH:c:\\PROGRA~1\\MIFD68~1\\Lib $(STDLINKDIRS)" ;
+
+CCFLAGS += /Zm200 ; # allow for 200% default mem consumption
+C++FLAGS += /Zm200 ;
+
+CCFLAGS += /Zp8 ; # byte align to 1 byte
+C++FLAGS += /Zp8 ;
+
+CCFLAGS += /D WIN32 /D _WIN32 ; # #define for all programs
+C++FLAGS += /D WIN32 /D _WIN32 ;
+
+CCFLAGS += /Od ; # diable optimizations
+C++FLAGS += /Od ;
+
+CCFLAGS += /GX ; # enable C++ exception handling
+C++FLAGS += /GX ;
+
+CCFLAGS += /W3 ; # increase warning level
+C++FLAGS += /W3 ;
+
+if $(RELEASE_BUILD) = 1 {
+    CCFLAGS += /MD ; # link with multithreaded libc dll (release)
+    C++FLAGS += /MD ;
+
+    CCFLAGS += /D NDEBUG ; # disable debug
+    C++FLAGS += /D NDEBUG ;
+
+} else {
+    CCFLAGS += /MDd ; # link with multithreaded libc dll (debug)
+    C++FLAGS += /MDd ;
+
+    CCFLAGS += /ZI /Yd /GZ /D _DEBUG ; # enable debug
+    C++FLAGS += /ZI /Yd /GZ /D _DEBUG ;
+    LINKFLAGS += /DEBUG ;
+}
+
+LINKFLAGS += /OPT:NOREF ;
+EXTRALIBS += advapi32.lib kernel32.lib user32.lib comdlg32.lib comctl32.lib
+	     gdi32.lib shell32.lib ws2_32.lib winmm.lib ;

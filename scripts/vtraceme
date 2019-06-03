@@ -1,0 +1,13 @@
+#!/usr/bin/ipython 
+
+import vtrace,sys
+
+pid = int(sys.argv[1])
+
+t = vtrace.getTrace()
+
+t.attach(pid)
+t.sendBreak()
+
+cmd.Cmd()
+

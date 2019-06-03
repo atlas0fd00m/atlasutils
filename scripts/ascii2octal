@@ -1,0 +1,24 @@
+#!/usr/bin/python
+import sys
+from atlasutils.ascii2octal import *
+
+"""
+converts ascii text into octal numerical representation.  eg.  "A" becomes ""
+intended for use inline using stdin/stdout
+"""
+
+
+
+ascii = None
+if (len(sys.argv) > 1):
+	if (sys.argv[1] == "--test"):
+		ascii = "HELLO"
+	elif (sys.argv[1] == "--help" or sys.argv[1] == "-h"):
+		printSyntax()
+	else:
+		ascii = sys.argv[1].strip()
+	print(ascii2hex(ascii))
+else:
+	line = sys.stdin.read()
+	sys.stdout.write(ascii2octal(line))
+

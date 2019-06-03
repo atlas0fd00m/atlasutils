@@ -1,0 +1,30 @@
+i've played with this idea for some time, and had limited success, so i put it down for a while.
+i recently needed it, started anew, then took a different direction.
+
+vtraceme and vtracenewchildren are one approach, and i don't even think they're finished... because
+in the middle of working on them, i took a new approach: vtracenewkids.  vtracenewkids is what i've 
+been using recently and i think i like it.  
+
+still, this is all very fresh and subject to change.
+
+to try vtracenewkids:
+
+ipython vtracenewkids <running_exe_name>
+>>> wait()
+
+wait() cocks the weapon and triggers on the new instance of whatever <running_exe_name> shows up in 
+the process list.  this approach allows you to trigger on the next instance, but not necessarily 
+immediately.  so for example, if you want to catch the next child only after your exploit script
+has interacted with it once, you can:
+* start vtracenewkids
+* launch the exploit script (assumingly with some sys.stdin.readline() or something to stop exec)
+* run wait() in vtracenewkids
+
+this should drop you in an interactive ipython/vtrace session with an actively attached vtrace
+object called "t"  (eg.  t.stepi())
+
+i've considered having tracenewkids import atlasutils.vtraceutils and probably will.
+
+feedback welcome.  improvements welcome.
+
+@

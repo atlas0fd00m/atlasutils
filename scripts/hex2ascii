@@ -1,0 +1,19 @@
+#!/usr/bin/python
+
+"""
+converts hexidecimal numerical representation into ascii text.  eg.  "41" becomes "A"
+intended for use inline using stdin/stdout
+"""
+
+import sys
+import re
+
+from atlasutils.ascii2hex import *
+
+
+output = "" 
+inputline = " "
+input = sys.stdin.read()
+sys.stdout.write(hex2ascii(input))
+
+

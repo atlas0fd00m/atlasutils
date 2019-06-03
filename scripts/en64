@@ -1,0 +1,14 @@
+#!/usr/bin/env python
+from base64 import *
+from sys import *
+
+"""
+encodes data into base64.  When encoding and decoding, be cautious of newlines...
+intended for use inline using stdin/stdout
+"""
+
+try:
+  while (True):
+    print (b64encode(stdin.next()))
+except StopIteration, e:
+  pass

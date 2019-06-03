@@ -1,0 +1,16 @@
+#!/usr/bin/python
+
+import sys
+import cobra.cluster
+
+workname = 'crapwork'
+if len(sys.argv) > 1:
+    workname = sys.argv[1]
+    
+cs = cobra.cluster.ClusterServer(workname)
+#cs.setClusterQueen('127.0.0.1')
+
+for i in xrange(10):
+    cs.addWork( cobra.cluster.ClusterWork() )
+
+cs.runServer()
