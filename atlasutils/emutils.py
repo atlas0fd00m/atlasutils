@@ -4,6 +4,8 @@ import sys
 import struct
 # from ihexparser import *
 import struct
+import traceback
+
 import envi
 import envi.memory as e_m
 import envi.expression as e_expr
@@ -197,6 +199,52 @@ class TraceMonitor(v_i_monitor.AnalysisMonitor):
 
 call_handlers = {}
 def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None):
+    '''
+    runStep is the core "debugging" functionality for this emulation-helper.  it's goal is to 
+    provide a single-step interface somewhat like what you might get from a GDB experience.  
+
+    pertinent registers are printed with their values, the current instruction, and any helpers
+    that the operands may point to in memory (as appropriate).
+
+    special features:
+    * tracedict allows code to be evaluated and printed at specific addresses: 
+            tracedict={va:'python code here', 'locals':{'something':4}}
+
+    * prints out the operands *after* exection as well  (arg:showafter=True) 
+
+    * cli interface allows viewing and modifying memory/python objects:
+            rax
+            [rax]
+            [rax:23]
+            [rax+8:4]
+            [0xf00b4:8]
+            rax=42
+            [0xf00b4]=0x47145
+    * cli allows skipping printing  (arg:silent=True)
+            silent=True
+    * cli allows running until a VA without pauses: 
+            go 0x12345
+    * cli allows executing until next branch:
+            b
+    * cli allows dumping the stack:
+            stack
+    * cli allows viewing/setting the Program Counter:
+            pc
+            pc=0x43243
+    * cli allows skipping instructions:
+            skip
+    * cli allows numerous libc-style functions:
+            memset
+            memcpy
+            strcpy
+            strncpy
+            strcat
+            strlen
+    
+    * call_handlers dict (global in the library) allows swapping in our python code in place of 
+        calls to other binary code, like memcpy, or other code which may fail in an emulator
+
+    '''
     global op, mcanv, call_handlers
 
     mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
@@ -210,6 +258,7 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
     quit = False
     moveon = False
     emuBranch = False
+    silentUntil = None
 
     silentExcept = [va for va, expr in tracedict.items() if expr is None]
 
@@ -242,6 +291,10 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
                 print "TraceMonitor ERROR at 0x%x: %r" % (pc, e)
 
         ####
+
+        if silentUntil == pc:
+            silent = False
+            silentUntil = None
 
         if silent and not pc in silentExcept:
             showafter = False
@@ -284,119 +337,133 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
 
                 uinp = raw_input(prompt)
                 while len(uinp) and not (moveon or quit or emuBranch):
-                    if uinp == "q":
-                        quit = True
-                        break
-                    elif uinp.startswith('go '):
-                        args = uinp.split(' ')
-                        if args[-1].startswith('+'):
-                            nonstop = int(args[-1],0)
-                        else:
-                            tova = int(args[-1],0)
-                            nonstop = 1
-                        break
+                    try:
+                        if uinp == "q":
+                            quit = True
+                            break
 
-                    elif uinp in ('b', 'branch'):
-                        emuBranch = True
-                        break
+                        elif uinp.startswith('silent'):
+                            parts = uinp.split(' ')
+                            silentUntil = emu.vw.parseExpression(parts[-1])
+                            silent = True
 
-                    elif uinp == 'stack':
-                        stackDump(emu)
-                        break
-
-                    elif uinp == 'refresh':
-                        # basically does a NOP, doesn't change anything, just let the data be reprinted.
-                        moveon = True
-                        break
-
-                    elif uinp.startswith('pc=') or uinp.startswith('pc ='):
-                        print "handling setProgramCounter()"
-                        args = uinp.split('=')
-                        newpc = int(args[-1], 0)
-                        print "new PC: 0x%x" % newpc
-                        emu.setProgramCounter(newpc)
-                        moveon = True
-                        break
-
-                    elif '=' in uinp:
-                        print "handling generic register/memory writes"
-                        args = uinp.split('=')
-                        data = args[-1].strip() #   .split(',')  ??? why did i ever do this?
-
-                        if '[' in args[0]:
-                            # memory derefs
-                            tgt = args[0].replace('[','').replace(']','').split(':')
-                            if len(tgt) > 1:
-                                size = parseExpression(emu, tgt[-1], emu.getRegisters())
+                        elif uinp.startswith('go '):
+                            args = uinp.split(' ')
+                            if args[-1].startswith('+'):
+                                nonstop = int(args[-1],0)
                             else:
-                                size = 4
+                                tova = int(args[-1],0)
+                                nonstop = 1
+                            break
 
-                            addrstr = tgt[0]
-                            memaddr = parseExpression(emu, addrstr, emu.getRegisters())
+                        elif uinp in ('b', 'branch'):
+                            emuBranch = True
+                            break
 
-                            if data.startswith('"') and data.endswith('"'):
-                                # write string data
-                                emu.writeMemory(memaddr, data[1:-1])
+                        elif uinp == 'stack':
+                            stackDump(emu)
+                            break
+
+                        elif uinp == 'refresh':
+                            # basically does a NOP, doesn't change anything, just let the data be reprinted.
+                            moveon = True
+                            break
+
+                        elif uinp.startswith('pc=') or uinp.startswith('pc ='):
+                            print "handling setProgramCounter()"
+                            args = uinp.split('=')
+                            newpc = int(args[-1], 0)
+                            print "new PC: 0x%x" % newpc
+                            emu.setProgramCounter(newpc)
+                            moveon = True
+                            break
+
+                        elif '=' in uinp:
+                            print "handling generic register/memory writes"
+                            args = uinp.split('=')
+                            data = args[-1].strip() #   .split(',')  ??? why did i ever do this?
+
+                            if '[' in args[0]:
+                                # memory derefs
+                                tgt = args[0].replace('[','').replace(']','').split(':')
+                                if len(tgt) > 1:
+                                    size = parseExpression(emu, tgt[-1], emu.getRegisters())
+                                else:
+                                    size = 4
+
+                                addrstr = tgt[0]
+                                memaddr = parseExpression(emu, addrstr, emu.getRegisters())
+
+                                if data.startswith('"') and data.endswith('"'):
+                                    # write string data
+                                    emu.writeMemory(memaddr, data[1:-1])
+                                else:
+                                    # write number
+                                    emu.writeMemValue(memaddr, parseExpression(emu, data, emu.getRegisters()), size)
+
                             else:
-                                # write number
-                                emu.writeMemValue(memaddr, parseExpression(emu, data, emu.getRegisters()), size)
+                                # must be registers
+                                emu.setRegisterByName(args[0], parseExpression(emu, data, emu.getRegisters()))
 
+                        elif uinp.strip().startswith('[') and ']' in uinp:
+                            try:
+                                idx = uinp.find('[') + 1
+                                eidx = uinp.find(']', idx)
+                                expr = uinp[idx:eidx]
+                                print "handling memory read at [%s]" % expr
+                                size = emu.getPointerSize()
+                                if ':' in expr:
+                                    nexpr, size = expr.rsplit(':',1)
+                                    try:
+                                        size = parseExpression(emu, size)
+                                        expr = nexpr
+                                    except:
+                                        # if number fails, just continue with a default size and the original expr
+                                        pass
+
+                                va = parseExpression(emu, expr)
+                                data = emu.readMemory(va, size)
+                                print "[%s:%s] == %r" % (expr, size, data.encode('hex'))
+                            except Exception as e:
+                                print "ERROR: %r" % e
+
+                        elif uinp == 'skip':
+                            newpc = emu.getProgramCounter() + len(op)
+                            print "new PC: 0x%x" % newpc
+                            skipop = True
+                            break
+                        elif uinp == 'memset':
+                            print memset(emu)
+                            skipop = True
+                        elif uinp == 'memcpy':
+                            print memcpy(emu)
+                            skipop = True
+                        elif uinp == 'strcpy':
+                            print strcpy(emu)
+                            skipop = True
+                        elif uinp == 'strncpy':
+                            print strncpy(emu)
+                            skipop = True
+                        elif uinp == 'strcat':
+                            print strcat(emu)
+                            skipop = True
+                        elif uinp == 'strlen':
+                            print strlen(emu)
+                            skipop = True
                         else:
-                            # must be registers
-                            emu.setRegisterByName(args[0], parseExpression(emu, data, emu.getRegisters()))
+                            try:
+                                lcls = locals()
+                                lcls.update(emu.getRegisters())
+                                out = eval(uinp, globals(), lcls)
+                                if type(out) in (int,long):
+                                    print(hex(out))
+                                else:
+                                    print(out)
+                            except:
+                                sys.excepthook(*sys.exc_info())
 
-                    elif uinp.strip().startswith('[') and ']' in uinp:
-                        try:
-                            idx = uinp.find('[') + 1
-                            eidx = uinp.find(']', idx)
-                            expr = uinp[idx:eidx]
-                            print "handling memory read at [%s]" % expr
-                            size = emu.getPointerSize()
-                            if ':' in expr:
-                                nexpr, size = expr.rsplit(':',1)
-                                try:
-                                    size = parseExpression(emu, size)
-                                    expr = nexpr
-                                except:
-                                    # if number fails, just continue with a default size and the original expr
-                                    pass
-
-                            va = parseExpression(emu, expr)
-                            data = emu.readMemory(va, size)
-                            print "[%s:%s] == %r" % (expr, size, data.encode('hex'))
-                        except Exception as e:
-                            print "ERROR: %r" % e
-
-                    elif uinp == 'skip':
-                        newpc = emu.getProgramCounter() + len(op)
-                        print "new PC: 0x%x" % newpc
-                        skipop = True
-                        break
-                    elif uinp == 'memset':
-                        print memset(emu)
-                        skipop = True
-                    elif uinp == 'memcpy':
-                        print memcpy(emu)
-                        skipop = True
-                    elif uinp == 'strcpy':
-                        print strcpy(emu)
-                        skipop = True
-                    elif uinp == 'strncpy':
-                        print strncpy(emu)
-                        skipop = True
-                    elif uinp == 'strcat':
-                        print strcat(emu)
-                        skipop = True
-                    elif uinp == 'strlen':
-                        print strlen(emu)
-                        skipop = True
-                    else:
-                        try:
-                            lcls = locals()
-                            lcls.update(emu.getRegisters())
-                            print eval(uinp, globals(), lcls)
-                        except:
-                            sys.excepthook(*sys.exc_info())
+                    except:
+                        traceback.print_exc()
 
                     uinp = raw_input(prompt)
 
@@ -423,7 +490,8 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
                 i += 1
 
                 if not silent: print "starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip))
-                vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
+                if hasattr(emu, 'curpath'):
+                    vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
                 skip = True
 
         if not skip and not skipop:
@@ -459,7 +527,7 @@ def getNameRefs(op, emu):
             opval = oper.getOperValue(op, emu)
             if type(opval) in (int, long):
                 opnm = emu.vw.getName(opval)
-                if opnm is None:
+                if opnm is None and hasattr(emu, 'getVivTaint'):
                     opnm = emu.getVivTaint(opval)
 
                 if opnm is not None:
@@ -468,7 +536,7 @@ def getNameRefs(op, emu):
             dopval = oper.getOperAddr(op, emu)
             if type(dopval) in (int, long):
                 dopnm = emu.vw.getName(dopval)
-                if opnm is None:
+                if opnm is None and hasattr(emu, 'getVivTaint'):
                     opnm = emu.getVivTaint(opval)
 
                 if dopnm is not None:
@@ -483,8 +551,8 @@ def getNameRefs(op, emu):
 def runUntil(emu, eip=0, mnem="int", maxstep=1000000):
     global op
     for i in range(maxstep):
-        pc=emu.getProgramCounter()
-        op=emu.parseOpcode(pc)
+        pc = emu.getProgramCounter()
+        op = emu.parseOpcode(pc)
         opbytes = emu.readMemory(pc,len(op))
         if pc == eip or op.mnem == mnem:
             break
@@ -821,21 +889,25 @@ class TestEmulator:
         quit = False
         moveon = False
         emuBranch = False
+        silentUntil = None
 
         i = 0
         while maxstep > i:
             skip = skipop = False
             i += 1
 
-            pc=emu.getProgramCounter()
+            pc = emu.getProgramCounter()
             if pc in (runTil, finish):
                 break
 
-            op=emu.parseOpcode(pc)
+            op = emu.parseOpcode(pc)
 
             # cancel emuBranch as we've come to one
             if op.isReturn() or op.isCall():
                 emuBranch = False
+
+            if silentUntil == pc:
+                silent = False
 
             if silent and not pc in silentExcept:
                 showafter = False
@@ -881,8 +953,13 @@ class TestEmulator:
                         if uinp == "q":
                             quit = True
                             break
+
+                        elif uinp.startswith('silent'):
+                            silent = (True, False)[silent]
+
                         elif uinp.startswith('go '):
                             args = uinp.split(' ')
+
                             if args[-1].startswith('+'):
                                 nonstop = int(args[-1],0)
                             else:
@@ -937,7 +1014,7 @@ class TestEmulator:
 
                             else:
                                 # must be registers
-                                emu.setRegisterByName(args[0], parseExpression(emu, data)
+                                emu.setRegisterByName(args[0], parseExpression(emu, data))
 
                         elif uinp.strip().startswith('[') and ']' in uinp:
                             try:
@@ -966,6 +1043,7 @@ class TestEmulator:
                             print "new PC: 0x%x" % newpc
                             skipop = True
                             break
+
                         elif uinp == 'memset':
                             print memset(emu)
                             skipop = True
@@ -988,7 +1066,11 @@ class TestEmulator:
                             try:
                                 lcls = locals()
                                 lcls.update(emu.getRegisters())
-                                print eval(uinp, globals(), lcls)
+                                out = eval(uinp, globals(), lcls)
+                                if type(out) in (int,long):
+                                    print(hex(out))
+                                else:
+                                    print(out)
                             except:
                                 sys.excepthook(*sys.exc_info())
 
@@ -1017,7 +1099,8 @@ class TestEmulator:
                     i += 1
 
                     self.dbgprint ("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
-                    vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
+                    if hasattr(emu, 'curpath'):
+                        vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
                     skip = True
 
             if not skip and not skipop:
@@ -1047,7 +1130,7 @@ class TestEmulator:
             data = '\t'.join(args)
             print(data)
 
-    def getNameRefs(op, emu):
+    def getNameRefs(self, op, emu):
         extra = ''
         ###  HACK: NOT FOR PUBLIC CONSUMPTION:
         taintPause = emu._pause_on_taint
@@ -1058,7 +1141,7 @@ class TestEmulator:
                 opval = oper.getOperValue(op, emu)
                 if type(opval) in (int, long):
                     opnm = emu.vw.getName(opval)
-                    if opnm is None:
+                    if opnm is None and hasattr(emu, 'getVivTaint'):
                         opnm = emu.getVivTaint(opval)
 
                     if opnm is not None:
@@ -1067,7 +1150,7 @@ class TestEmulator:
                 dopval = oper.getOperAddr(op, emu)
                 if type(dopval) in (int, long):
                     dopnm = emu.vw.getName(dopval)
-                    if opnm is None:
+                    if opnm is None and hasattr(emu, 'getVivTaint'):
                         opnm = emu.getVivTaint(opval)
 
                     if dopnm is not None:
@@ -1081,8 +1164,8 @@ class TestEmulator:
     def runUntil(emu, eip=0, mnem="int", maxstep=1000000):
         global op
         for i in range(maxstep):
-            pc=emu.getProgramCounter()
-            op=emu.parseOpcode(pc)
+            pc = emu.getProgramCounter()
+            op = emu.parseOpcode(pc)
             opbytes = emu.readMemory(pc,len(op))
             if pc == eip or op.mnem == mnem:
                 break
