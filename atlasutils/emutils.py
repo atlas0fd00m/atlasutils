@@ -6,7 +6,9 @@ import struct
 import struct
 import envi
 import envi.memory as e_m
+import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
+
 import atlasutils.smartprint as sp
 import visgraph.pathcore as vg_path
 
@@ -119,13 +121,12 @@ def showPriRegisters(emu, snapshot=SNAP_NORM):
             break
 
     reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
-    reg_dict = {reg_table[i]: (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table))}
+    reg_dict = {reg_table[i][0]: (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table))}
 
     # print through the various registers
     for i in range(len(gen_regs)):
-        r = gen_regs[i]
-        rname, rsz = r
-        rsz, rval = reg_dict.get(r)
+        rname = gen_regs[i]
+        rsz, rval = reg_dict.get(rname)
 
         # line break every so often
         if (i % 5 == 0):
@@ -167,6 +168,14 @@ def stackDump(emu):
         print("\t0x%x:\t0x%x" % (sp, emu.readMemValue(sp, emu.psize)))
         sp += emu.psize
 
+def parseExpression(emu, expr, lcls={}):
+    '''
+    localized updated expression parser for the emulator at any state
+    '''
+    lcls = emu.vw.getExpressionLocals()
+    lcls.update(emu.getRegisters())
+    return e_expr.evaluate(expr, lcls)
+
 '''
 import vivisect.impemu.monitor as v_i_monitor
 class TraceMonitor(v_i_monitor.AnalysisMonitor):
@@ -207,6 +216,7 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
     i = 0
     while maxstep > i:
         skip = skipop = False
+        i += 1
 
         pc=emu.getProgramCounter()
         if pc in (runTil, finish):
@@ -311,21 +321,29 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
                     elif '=' in uinp:
                         print "handling generic register/memory writes"
                         args = uinp.split('=')
-                        details = args[-1].split(',')
+                        data = args[-1].strip() #   .split(',')  ??? why did i ever do this?
+
                         if '[' in args[0]:
-                            if len(details) > 1:
-                                size = int(details[-1])
+                            # memory derefs
+                            tgt = args[0].replace('[','').replace(']','').split(':')
+                            if len(tgt) > 1:
+                                size = parseExpression(emu, tgt[-1], emu.getRegisters())
                             else:
                                 size = 4
 
-                            #memaddr = int(args[0].replace('[','').replace(']',''), 0)
-                            memaddr = emu.vw.parseExpression(args[0].replace('[','').replace(']',''))
-                            emu.writeMemValue(memaddr, emu.vw.parseExpression(details[0], 0), size)
-                            #emu.writeMemValue(memaddr, int(details[0], 0), size)
+                            addrstr = tgt[0]
+                            memaddr = parseExpression(emu, addrstr, emu.getRegisters())
+
+                            if data.startswith('"') and data.endswith('"'):
+                                # write string data
+                                emu.writeMemory(memaddr, data[1:-1])
+                            else:
+                                # write number
+                                emu.writeMemValue(memaddr, parseExpression(emu, data, emu.getRegisters()), size)
 
                         else:
                             # must be registers
-                            emu.setRegisterByName(args[0], int(details[0], 0))
+                            emu.setRegisterByName(args[0], parseExpression(emu, data, emu.getRegisters()))
 
                     elif uinp.strip().startswith('[') and ']' in uinp:
                         try:
@@ -337,13 +355,13 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
                             if ':' in expr:
                                 nexpr, size = expr.rsplit(':',1)
                                 try:
-                                    size = emu.vw.parseExpression(size)
+                                    size = parseExpression(emu, size)
                                     expr = nexpr
                                 except:
                                     # if number fails, just continue with a default size and the original expr
                                     pass
 
-                            va = emu.vw.parseExpression(expr)
+                            va = parseExpression(emu, expr)
                             data = emu.readMemory(va, size)
                             print "[%s:%s] == %r" % (expr, size, data.encode('hex'))
                         except Exception as e:
@@ -374,7 +392,9 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
                         skipop = True
                     else:
                         try:
-                            print eval(uinp, globals(), locals())
+                            lcls = locals()
+                            lcls.update(emu.getRegisters())
+                            print eval(uinp, globals(), lcls)
                         except:
                             sys.excepthook(*sys.exc_info())
 
@@ -742,13 +762,12 @@ class TestEmulator:
                 break
 
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
-        reg_dict = { reg_table[i] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }
+        reg_dict = { reg_table[i][0] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }
 
         # print through the various registers
         for i in range(len(gen_regs)):
-            r = gen_regs[i]
-            rname, rsz = r
-            rsz, rval = reg_dict.get(r)
+            rname = gen_regs[i]
+            rsz, rval = reg_dict.get(rname)
 
             # line break every so often
             if (i%5 == 0):
@@ -896,21 +915,29 @@ class TestEmulator:
                         elif '=' in uinp:
                             print "handling generic register/memory writes"
                             args = uinp.split('=')
-                            details = args[-1].split(',')
+                            data = args[-1].strip() #   .split(',')  ??? why did i ever do this?
+
                             if '[' in args[0]:
-                                if len(details) > 1:
-                                    size = int(details[-1])
+                                # memory derefs
+                                tgt = args[0].replace('[','').replace(']','').split(':')
+                                if len(tgt) > 1:
+                                    size = parseExpression(emu, tgt[-1], emu.getRegisters())
                                 else:
                                     size = 4
 
-                                #memaddr = int(args[0].replace('[','').replace(']',''), 0)
-                                memaddr = emu.vw.parseExpression(args[0].replace('[','').replace(']',''))
-                                emu.writeMemValue(memaddr, emu.vw.parseExpression(details[0], 0), size)
-                                #emu.writeMemValue(memaddr, int(details[0], 0), size)
+                                addrstr = tgt[0]
+                                memaddr = parseExpression(emu, addrstr, emu.getRegisters())
+
+                                if data.startswith('"') and data.endswith('"'):
+                                    # write string data
+                                    emu.writeMemory(memaddr, data[1:-1])
+                                else:
+                                    # write number
+                                    emu.writeMemValue(memaddr, parseExpression(emu, data, emu.getRegisters()), size)
 
                             else:
                                 # must be registers
-                                emu.setRegisterByName(args[0], int(details[0], 0))
+                                emu.setRegisterByName(args[0], parseExpression(emu, data)
 
                         elif uinp.strip().startswith('[') and ']' in uinp:
                             try:
@@ -922,13 +949,13 @@ class TestEmulator:
                                 if ':' in expr:
                                     nexpr, size = expr.rsplit(':',1)
                                     try:
-                                        size = emu.vw.parseExpression(size)
+                                        size = parseExpression(emu, size)
                                         expr = nexpr
-                                    except:
+                                    except Exception as e:
                                         # if number fails, just continue with a default size and the original expr
-                                        pass
+                                        print "unknown size: %r.  using default size." % size
 
-                                va = emu.vw.parseExpression(expr)
+                                va = parseExpression(emu, expr)
                                 data = emu.readMemory(va, size)
                                 print "[%s:%s] == %r" % (expr, size, data.encode('hex'))
                             except Exception as e:
@@ -959,7 +986,9 @@ class TestEmulator:
                             skipop = True
                         else:
                             try:
-                                print eval(uinp, globals(), locals())
+                                lcls = locals()
+                                lcls.update(emu.getRegisters())
+                                print eval(uinp, globals(), lcls)
                             except:
                                 sys.excepthook(*sys.exc_info())
 
