@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 '''
-from atlasutils private collection
-
 vw is a vivisect workspace/dev environment, allowing easier access to 
 Vivisect internals.  
 '''
