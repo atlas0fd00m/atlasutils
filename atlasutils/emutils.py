@@ -47,17 +47,17 @@ def printMemStatus(emu, op=None, use_cached=False):
                     if addr not in addrs:
                         addrs.append(addr)
             except Exception as e:
-                print "error: %s" % e
+                print("error: %s" % e)
 
     for addr in addrs:
         if not emu.isValidPointer(addr):
             if emu.vw.verbose:
                 if type(addr) in (int, long):
-                    print "No valid memory at address: 0x%x" % addr
+                    print("No valid memory at address: 0x%x" % addr)
                 else:
-                    print "No valid memory at address: %s" % addr
+                    print("No valid memory at address: %s" % addr)
             continue
-        print XW(emu, addr, snapshot=SNAP_SWAP)
+        print(XW(emu, addr, snapshot=SNAP_SWAP))
     cached_mem_locs = addrs
 
 
@@ -117,7 +117,7 @@ def XW(tracer, address, length=3, dwperline=8, snapshot=0):
 PriRegSnapshot = {}
 def showPriRegisters(emu, snapshot=SNAP_NORM):
     global PriRegSnapshot
-    print "\nRegisters:"
+    print("\nRegisters:")
     reggrps = emu.vw.arch.archGetRegisterGroups()
     for name, gen_regs in reggrps:
         if name == 'general':
@@ -126,7 +126,7 @@ def showPriRegisters(emu, snapshot=SNAP_NORM):
     reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
     reg_dict = {reg_table[i][0]: (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table))}
 
-    # print through the various registers
+    # print(through the various registers)
     for i in range(len(gen_regs)):
         rname = gen_regs[i]
         rsz, rval = reg_dict.get(rname)
@@ -149,19 +149,19 @@ def showPriRegisters(emu, snapshot=SNAP_NORM):
 
         rnpad = ' ' * (11 - len(rname))
 
-        fmt = "%%s%%s: %%%dx%%s" % (rsz/4)
+        fmt = "%%s%%s: %%%dx%%s" % (rsz//4)
         sys.stdout.write(fmt % (rnpad, pre + rname, rval, post))
 
     # Line feed
-    print "\n"
+    print("\n")
 
 
 def showFlags(self):
     """
     Show the contents of the Status Register
     """
-    # print "\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister()))
-    print "\tStatFlags: " + '\t'.join(["%s %s" % (f, v) for f, v in self.getStatusFlags().items()])
+    # print("\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister())))
+    print("\tStatFlags: " + '\t'.join(["%s %s" % (f, v) for f, v in self.getStatusFlags().items()]))
 
 
 def stackDump(emu):
@@ -193,9 +193,9 @@ class TraceMonitor(v_i_monitor.AnalysisMonitor):
             return
 
         try:
-            print repr(eval(tdata))
+            print(repr(eval(tdata)))
         except Exception as e:
-            print "TraceMonitor ERROR at 0x%x: %r" % (starteip, e)
+            print("TraceMonitor ERROR at 0x%x: %r" % (starteip, e))
 '''
 
 testemu = None
@@ -236,7 +236,7 @@ def getNameRefs(op, emu):
                 if dopnm is not None:
                     extra += '\t; &$%d = %r' % (operidx, dopnm)
     except Exception as e:
-        print "getNameRefs: ERROR: %r" % e
+        print("getNameRefs: ERROR: %r" % e)
     finally:
         #emu._pause_on_taint = taintPause
         pass
@@ -254,18 +254,18 @@ def runUntil(emu, eip=0, mnem="int", maxstep=1000000):
     runStep(emu)
 
 def printWriteLog(emu):
-    print '\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')])
+    print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')]))
 
 def selectTest():
 
-    print "The following tests implement T80515 disassembly or emulation.\n\n"
+    print("The following tests implement T80515 disassembly or emulation.\n\n")
 
-    print "Select Test: \n[0] Disassemble Only \n[1] Emulation \n",
+    print("Select Test: \n[0] Disassemble Only \n[1] Emulation \n",)
     dotest = raw_input()
     if dotest.isdigit():
         return int(dotest)
     else:
-        print "Unknown test selected"
+        print("Unknown test selected")
         sys.exit()
 
 class Iemu(cmd.Cmd):
@@ -315,7 +315,7 @@ class Iemu(cmd.Cmd):
         except KeyboardException:
             self.do_quit()
 
-        print ">> " + output
+        print(">> " + output)
 
     def do_run(self, line):
         count = 30
@@ -354,13 +354,13 @@ def readString(emu, va, CHUNK=50):
 def memset(emu, op=None):
     data = ('%c' % emu.getRegisterByName('r1')) * emu.getRegisterByName('r2')
     emu.writeMemory(emu.getRegisterByName('r0'), data)
-    print data
+    print(data)
     return data
 
 def memcpy(emu, op=None):
     data = emu.readMemory(emu.getRegisterByName('r1'), emu.getRegisterByName('r2'))
     emu.writeMemory(emu.getRegisterByName('r0'), data)
-    print data
+    print(data)
     return data
 
 def strncpy(emu, op=None):
@@ -369,13 +369,13 @@ def strncpy(emu, op=None):
     if nulloc != -1:
         data = data[:nulloc]
     emu.writeMemory(emu.getRegisterByName('r0'), data)
-    print data
+    print(data)
     return data
 
 def strcpy(emu, op=None):
     data = readString(emu, emu.getRegisterByName('r1')) + '\0'
     emu.writeMemory(emu.getRegisterByName('r0'), data)
-    print data
+    print(data)
     return data
 
 def strcat(emu, op=None):
@@ -383,13 +383,13 @@ def strcat(emu, op=None):
     initial = readString(emu, start)
     data = readString(emu, emu.getRegisterByName('r1'))
     emu.writeMemory(start + len(initial), data)
-    print initial+data
+    print(initial+data)
     return initial+data
 
 def strlen(emu, op=None):
     data = readString(emu, emu.getRegisterByName('r0'))
     emu.setRegisterByName('r0', len(data))
-    print len(data)
+    print(len(data))
     return len(data)
 
 allocated_ptr = 0x10000000
@@ -422,10 +422,10 @@ def syslog(emu, op=None):
 
     args = tuple([emu.getRegister(x) for x in range(2, 2+count)])
     outstring = string % args
-    print "SYSLOG(%d): %s" % (loglvl, outstring)
+    print("SYSLOG(%d): %s" % (loglvl, outstring))
     for s in args:
         if emu.isValidPointer(s):
-            print "\t" + readString(emu, s)
+            print("\t" + readString(emu, s))
 
 
 prehilite = '\x1b[7m'
@@ -460,8 +460,8 @@ def compare(data1, data2):
         out1.append(posthilite)
         out2.append(posthilite)
 
-    print ''.join(out1)
-    print ''.join(out2)
+    print(''.join(out1))
+    print(''.join(out2))
 
 
 class TestEmulator:
@@ -517,7 +517,7 @@ class TestEmulator:
 
 
     def showPriRegisters(self, emu, snapshot=SNAP_NORM):
-        print "\nRegisters:"
+        print("\nRegisters:")
         reggrps = emu.vw.arch.archGetRegisterGroups()
         for name, gen_regs in reggrps:
             if name == 'general':
@@ -526,7 +526,7 @@ class TestEmulator:
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
         reg_dict = { reg_table[i][0] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }
 
-        # print through the various registers
+        # print(through the various registers)
         for i in range(len(gen_regs)):
             rname = gen_regs[i]
             rsz, rval = reg_dict.get(rname)
@@ -549,18 +549,18 @@ class TestEmulator:
 
             rnpad = ' ' * (11 - len(rname))
 
-            fmt = "%%s%%s: %%%dx%%s" % (rsz/4)
+            fmt = "%%s%%s: %%%dx%%s" % (rsz//4)
             sys.stdout.write(fmt % (rnpad, pre + rname, rval, post))
 
         # Line feed
-        print "\n"
+        print("\n")
 
     def showFlags(self):
         """
         Show the contents of the Status Register
         """
-        #print "\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister()))
-        print "\tStatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in self.emu.getStatusFlags().items()])
+        #print("\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister())))
+        print("\tStatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in self.emu.getStatusFlags().items()]))
 
 
     def stackDump(self):
@@ -575,8 +575,8 @@ class TestEmulator:
     def printStats(self, i):
         curtime = time.time()
         dtime = curtime - self.startRun
-        print "since start: %d instructions in %.3f secs: %3f ops/sec" % \
-                (i, dtime, i/dtime)
+        print("since start: %d instructions in %.3f secs: %3f ops/sec" % \
+                (i, dtime, i//dtime))
 
     def runStep(self, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None):
         '''
@@ -634,7 +634,7 @@ class TestEmulator:
         if tracedict is None:
             tracedict = {}
         else:
-            print "tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) in (int,long)]))
+            print("tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) in (int,long)])))
 
 
         nonstop = 0
@@ -674,9 +674,9 @@ class TestEmulator:
                         if outlcls is not None:
                             lcls.update(outlcls)
 
-                        print repr(eval(tdata, globals(), lcls))
+                        print(repr(eval(tdata, globals(), lcls)))
                     except Exception as e:
-                        print "TraceMonitor ERROR at 0x%x: %r" % (pc, e)
+                        print("TraceMonitor ERROR at 0x%x: %r" % (pc, e))
 
                 ####
 
@@ -694,21 +694,21 @@ class TestEmulator:
                     try:
                         printMemStatus(emu, op)
                     except Exception as e:
-                        print "MEM ERROR: %s:    0x%x %s" % (e, op.va, op)
+                        print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
 
-                    print "Step: %s" % i
+                    print("Step: %s" % i)
                     mcanv.clearCanvas()
                     try:
                         op.render(mcanv)
                     except Exception as e:
-                        print "ERROR rendering opcode: %r" % e
+                        print("ERROR rendering opcode: %r" % e)
 
                     extra = getNameRefs(op, emu)
 
                     opbytes = emu.readMemory(pc,len(op))
                     print("%.4x\t%20s\t%s\t%s"%(pc,sp.hexText(opbytes),mcanv.strval, extra))
 
-                    print "---------"
+                    print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "
 
                     # nonstop controls whether we stop.  tova indicates we're hunting for a va, otherwise 
@@ -761,16 +761,16 @@ class TestEmulator:
                                     break
 
                                 elif uinp.startswith('pc=') or uinp.startswith('pc ='):
-                                    print "handling setProgramCounter()"
+                                    print("handling setProgramCounter()")
                                     args = uinp.split('=')
                                     newpc = parseExpression(emu, args[-1])
-                                    print "new PC: 0x%x" % newpc
+                                    print("new PC: 0x%x" % newpc)
                                     emu.setProgramCounter(newpc)
                                     moveon = True
                                     break
 
                                 elif '=' in uinp:
-                                    print "handling generic register/memory writes"
+                                    print("handling generic register/memory writes")
                                     args = uinp.split('=')
                                     data = args[-1].strip() #   .split(',')  ??? why did i ever do this?
 
@@ -801,7 +801,7 @@ class TestEmulator:
                                         idx = uinp.find('[') + 1
                                         eidx = uinp.find(']', idx)
                                         expr = uinp[idx:eidx]
-                                        print "handling memory read at [%s]" % expr
+                                        print("handling memory read at [%s]" % expr)
                                         size = emu.getPointerSize()
                                         if ':' in expr:
                                             nexpr, size = expr.rsplit(':',1)
@@ -810,37 +810,37 @@ class TestEmulator:
                                                 expr = nexpr
                                             except Exception as e:
                                                 # if number fails, just continue with a default size and the original expr
-                                                print "unknown size: %r.  using default size." % size
+                                                print("unknown size: %r.  using default size." % size)
 
                                         va = parseExpression(emu, expr)
                                         data = emu.readMemory(va, size)
-                                        print "[%s:%s] == %r" % (expr, size, data.encode('hex'))
+                                        print("[%s:%s] == %r" % (expr, size, data.encode('hex')))
                                     except Exception as e:
-                                        print "ERROR: %r" % e
+                                        print("ERROR: %r" % e)
 
                                 elif uinp == 'skip':
                                     newpc = emu.getProgramCounter() + len(op)
-                                    print "new PC: 0x%x" % newpc
+                                    print("new PC: 0x%x" % newpc)
                                     skipop = True
                                     break
 
                                 elif uinp == 'memset':
-                                    print memset(emu)
+                                    print(memset(emu))
                                     skipop = True
                                 elif uinp == 'memcpy':
-                                    print memcpy(emu)
+                                    print(memcpy(emu))
                                     skipop = True
                                 elif uinp == 'strcpy':
-                                    print strcpy(emu)
+                                    print(strcpy(emu))
                                     skipop = True
                                 elif uinp == 'strncpy':
-                                    print strncpy(emu)
+                                    print(strncpy(emu))
                                     skipop = True
                                 elif uinp == 'strcat':
-                                    print strcat(emu)
+                                    print(strcat(emu))
                                     skipop = True
                                 elif uinp == 'strlen':
-                                    print strlen(emu)
+                                    print(strlen(emu))
                                     skipop = True
                                 else:
                                     try:
@@ -869,7 +869,7 @@ class TestEmulator:
 
                 # handle Calls separately
                 if len(op.opers) and op.iflags & (envi.IF_CALL) and not skipop:
-                    self.dbgprint ("Call...")
+                    self.dbgprint("Call...")
                     tva = op.getOperValue(0, emu)
                     handler = self.call_handlers.get(tva)
                     self.dbgprint( " handler for call to (0x%x): %r" % (tva, handler))
@@ -889,7 +889,7 @@ class TestEmulator:
                         if hasattr(emu, 'emumon') and emu.emumon is not None:
                             emu.emumon.posthook(emu, op, endeip)
 
-                        self.dbgprint ("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
+                        self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
                         if hasattr(emu, 'curpath'):
                             vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
                         skip = True
@@ -907,7 +907,7 @@ class TestEmulator:
 
                             printMemStatus(emu, op, use_cached=True)
                         except Exception as e:
-                            print "MEM ERROR: %s:    0x%x %s" % (e, op.va, op)
+                            print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
 
                 # unless we've asked to skip the instruction...
                 elif skipop:
@@ -959,7 +959,7 @@ class TestEmulator:
                     if dopnm is not None:
                         extra += '\t; &$%d = %r' % (operidx, dopnm)
         except Exception as e:
-            print "getNameRefs: ERROR: %r" % e
+            print("getNameRefs: ERROR: %r" % e)
         finally:
             emu._pause_on_taint = taintPause
         return extra
@@ -976,7 +976,7 @@ class TestEmulator:
         runStep(emu)
 
     def printWriteLog(emu):
-        print '\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')])
+        print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')]))
 
 
 if __name__ == "__main__":
