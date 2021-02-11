@@ -16,7 +16,7 @@ class LibraryNotifier(vtrace.Notifier):
     """
     def notify(self, event, trace):
         if event == vtrace.NOTIFY_LOAD_LIBRARY:
-            print "-----Library Loaded:",trace.getMeta("LatestLibrary")
+            print("-----Library Loaded:",trace.getMeta("LatestLibrary"))
 
 
 class tracebin:

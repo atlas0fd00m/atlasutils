@@ -1,3 +1,4 @@
+import sys
 from sys import *
 from atlasutils.props import *
 from atlasutils.smartprint import *
@@ -5,18 +6,18 @@ from atlasutils.smartprint import *
 try:
     from pydasm import *
 except:
-    print >>stderr,("pydasm not found, continuing anyway")
+    print(("pydasm not found, continuing anyway"), file=sys.stderr)
 
 try:
     from disassemble import *
 except:
-    print >>stderr,("libdisassemble not found, continuing anyway")
+    print(("libdisassemble not found, continuing anyway"), file=sys.stderr)
 
 try:
     import envi.archs.i386 as e_i386
     import envi.archs.i386.disasm as e_i386d
 except:
-    print >>stderr,("envi not found, continuing anyway")
+    print(("envi not found, continuing anyway"), file=sys.stderr)
 
 
 from Elf import *
@@ -84,7 +85,7 @@ def disassLD(buffer, offset=0, base = 0, mode = 32):
         o = Opcode(buffer, offset, mode)
         #opcodes.append("%x: %s\t %s"%((base+offset),"",o.printOpcode("AT&T",30)))
         opcodes.append(((base+offset), o))
-        print repr(o)
+        print(repr(o))
         if o == None:
             return opcodes
         offset += o.getSize()
@@ -160,13 +161,13 @@ def getOperandValue(vtrace, op, operand):
         if source.base:
             source = source.base
         dereference = True
-        #print >>outfile,("DEBUG-expr: %x"%numaddr)
+        #print(>>outfile,("DEBUG-expr: %x"%numaddr))
     if isinstance(source, SIB):
         if source.index:
             numaddr += (souce.index * source.scale)
         if source.base:
             source = source.base
-        #print >>outfile,("DEBUG-sib: %x"%numaddr)
+        #print(>>outfile,("DEBUG-sib: %x"%numaddr))
     if isinstance(source, Register):
         reg = source.name
         mask = 0xffffffff       # 32 bit only
@@ -179,19 +180,19 @@ def getOperandValue(vtrace, op, operand):
                 mask = 0xff00
             reg = 'e%cx'%reg[0]                             # vtrace doesn't like al/ah and possibly ax
         numaddr += (vtrace.getRegisterByName(reg) & mask)
-        #print >>outfile,("DEBUG-reg: %x"%numaddr)
+        #print(>>outfile,("DEBUG-reg: %x"%numaddr))
     elif isinstance(source, Address):
         numaddr += source.value
         if source.relative:
             numaddr += eip + op.off
-        #print >>outfile,("DEBUG-addr: %x"%numaddr)
+        #print(>>outfile,("DEBUG-addr: %x"%numaddr))
     if dereference:
         try:
             numaddr = struct.unpack("L",vtrace.readMemory(numaddr, 4))[0]
-            #print >>outfile,("DEBUG-deref: %x"%numaddr)
+            #print(>>outfile,("DEBUG-deref: %x"%numaddr))
         except:
-            #print >>outfile,("DEBUG-deref-except: %x"%numaddr)
-            #print >>stderr,("DEBUG-deref-except: %x"%numaddr)
+            #print(>>outfile,("DEBUG-deref-except: %x"%numaddr))
+            #print(("DEBUG-deref-except: %x"%numaddr), file=sys.stderr)
             pass
             
     return numaddr
@@ -201,6 +202,6 @@ def disass(bytes, offset=0, VMA = 0, mode = 32, printbytes = True):
     """  This is just a simple interactive "byte" disassembler for real byte decoding, etc..."""
     for addr,opcode in disassLD(bytes, offset, VMA, mode):
         if printbytes:
-            print "%x: %40s\t%s"%(addr,hexText(opcode.data[opcode.dataoffset:opcode.off]), opcode.printOpcode("AT&T", addr))
+            print("%x: %40s\t%s"%(addr,hexText(opcode.data[opcode.dataoffset:opcode.off]), opcode.printOpcode("AT&T", addr)))
         else:
-            print "%x: %s"%(addr,opcode.printOpcode("AT&T", addr))
+            print("%x: %s"%(addr,opcode.printOpcode("AT&T", addr)))
