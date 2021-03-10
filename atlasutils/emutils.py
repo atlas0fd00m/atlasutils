@@ -3,7 +3,6 @@ import cmd
 import sys
 import time
 import struct
-# from ihexparser import *
 import struct
 import traceback
 
@@ -12,164 +11,14 @@ import envi.memory as e_m
 import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
 
-import atlasutils.smartprint as sp
 import visgraph.pathcore as vg_path
-
-IRAM_SIZE = 0x30
-IRAM_OFFSET = 0
-FLASH_OFFSET = 0
-
-cached_mem_locs = []
-
-
-def printMemStatus(emu, op=None, use_cached=False):
-    global cached_mem_locs
-    pc = emu.getProgramCounter()
-    SP = emu.getStackCounter()
-    if op is None:
-        return
-
-    done = []
-    if use_cached:
-        addrs = cached_mem_locs
-    else:
-        addrs = []
-        for oper in op.opers:
-            try:
-                # value
-                addr = oper.getOperValue(op, emu)
-                if type(addr) in (int, long):
-                    if addr not in addrs:
-                        addrs.append(addr)
-                # address
-                addr = oper.getOperAddr(op, emu)
-                if addr is not None:
-                    if addr not in addrs:
-                        addrs.append(addr)
-            except Exception as e:
-                print("error: %s" % e)
-
-    for addr in addrs:
-        if not emu.isValidPointer(addr):
-            if emu.vw.verbose:
-                if type(addr) in (int, long):
-                    print("No valid memory at address: 0x%x" % addr)
-                else:
-                    print("No valid memory at address: %s" % addr)
-            continue
-        print(XW(emu, addr, snapshot=SNAP_SWAP))
-    cached_mem_locs = addrs
+from binascii import hexlify, unhexlify
 
 
 SNAP_NORM = 0
 SNAP_CAP = 1
 SNAP_DIFF = 2
 SNAP_SWAP = 3
-XWsnapshot = {}
-
-
-def XW(tracer, address, length=3, dwperline=8, snapshot=0):
-    global XWsnapshot
-
-    output = []
-    mm = tracer.getMemoryMap(address)
-    if mm is None:
-        return ''
-
-    mmva, mmsz, mmperm, mmname = mm
-    if mmva+mmsz < address + (length*4):
-        goodbcnt = (mmva+mmsz-address)
-        diff = (length*4) - goodbcnt
-        bs = tracer.readMemory(address, goodbcnt)
-        bs += 'A' * diff
-
-    else:
-        bs = tracer.readMemory(address, length*4)
-
-    for i in range(length):
-        addr = address + (i * 4)
-        if (i % dwperline == 0):
-            output.append("%.08x:\t " % (addr))
-
-        data = bs[i*4:(i*4)+4]
-
-        # do the snapshotting thing
-        pre = post = ''
-        if snapshot in (SNAP_DIFF, SNAP_SWAP):
-            sdata = XWsnapshot.get(addr)
-            if sdata is not None and sdata != data:
-                # highlight the text somehow
-                pre = '\x1b[7m'
-                post = '\x1b[27m'
-
-        if snapshot in (SNAP_CAP, SNAP_SWAP):
-            XWsnapshot[addr] = data
-        output.append(pre + bs[i*4:(i*4)+4].encode('hex') + post)
-
-        if ((i+1) % dwperline == 0):
-            output.append("\n")
-        else:
-            output.append("  ")
-
-    return "".join(output)
-
-
-PriRegSnapshot = {}
-def showPriRegisters(emu, snapshot=SNAP_NORM):
-    global PriRegSnapshot
-    print("\nRegisters:")
-    reggrps = emu.vw.arch.archGetRegisterGroups()
-    for name, gen_regs in reggrps:
-        if name == 'general':
-            break
-
-    reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
-    reg_dict = {reg_table[i][0]: (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table))}
-
-    # print(through the various registers)
-    for i in range(len(gen_regs)):
-        rname = gen_regs[i]
-        rsz, rval = reg_dict.get(rname)
-
-        # line break every so often
-        if (i % 5 == 0):
-            sys.stdout.write("\n")#%4x"%i)
-
-        # do snapshotting:
-        pre = post = ''
-        if snapshot in (SNAP_DIFF, SNAP_SWAP):
-            srval = XWsnapshot.get(rname)
-            if srval is not None and srval != rval:
-                # highlight the text somehow
-                pre = '\x1b[7m'
-                post = '\x1b[27m'
-
-        if snapshot in (SNAP_CAP, SNAP_SWAP):
-            XWsnapshot[rname] = rval
-
-        rnpad = ' ' * (11 - len(rname))
-
-        fmt = "%%s%%s: %%%dx%%s" % (rsz//4)
-        sys.stdout.write(fmt % (rnpad, pre + rname, rval, post))
-
-    # Line feed
-    print("\n")
-
-
-def showFlags(self):
-    """
-    Show the contents of the Status Register
-    """
-    # print("\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister())))
-    print("\tStatFlags: " + '\t'.join(["%s %s" % (f, v) for f, v in self.getStatusFlags().items()]))
-
-
-def stackDump(emu):
-    print("Stack Dump:")
-    sp = emu.getStackCounter()
-    for x in range(16):
-        print("\t0x%x:\t0x%x" % (sp, emu.readMemValue(sp, emu.psize)))
-        sp += emu.psize
 
 def parseExpression(emu, expr, lcls={}):
     '''
@@ -179,7 +28,6 @@ def parseExpression(emu, expr, lcls={}):
     lcls.update(emu.getRegisters())
     return e_expr.evaluate(expr, lcls)
 
-'''
 import vivisect.impemu.monitor as v_i_monitor
 class TraceMonitor(v_i_monitor.AnalysisMonitor):
     def __init__(self, traces=None):
@@ -196,7 +44,6 @@ class TraceMonitor(v_i_monitor.AnalysisMonitor):
             print(repr(eval(tdata)))
         except Exception as e:
             print("TraceMonitor ERROR at 0x%x: %r" % (starteip, e))
-'''
 
 testemu = None
 call_handlers = {}
@@ -210,134 +57,6 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
     testemu.runStep(maxstep=maxstep, follow=follow, showafter=showafter, runTil=runTil, pause=pause, silent=silent, finish=finish, tracedict=tracedict)
 
 
-def getNameRefs(op, emu):
-    extra = ''
-    ###  HACK: NOT FOR PUBLIC CONSUMPTION:
-    #taintPause = emu._pause_on_taint
-    #emu._pause_on_taint = False
-    try:
-
-        for operidx, oper in enumerate(op.opers):
-            opval = oper.getOperValue(op, emu)
-            if type(opval) in (int, long):
-                opnm = emu.vw.getName(opval)
-                if opnm is None and hasattr(emu, 'getVivTaint'):
-                    opnm = emu.getVivTaint(opval)
-
-                if opnm is not None:
-                    extra += '\t; $%d = %r' % (operidx, opnm)
-
-            dopval = oper.getOperAddr(op, emu)
-            if type(dopval) in (int, long):
-                dopnm = emu.vw.getName(dopval)
-                if opnm is None and hasattr(emu, 'getVivTaint'):
-                    opnm = emu.getVivTaint(opval)
-
-                if dopnm is not None:
-                    extra += '\t; &$%d = %r' % (operidx, dopnm)
-    except Exception as e:
-        print("getNameRefs: ERROR: %r" % e)
-    finally:
-        #emu._pause_on_taint = taintPause
-        pass
-    return extra
-
-def runUntil(emu, eip=0, mnem="int", maxstep=1000000):
-    global op
-    for i in range(maxstep):
-        pc = emu.getProgramCounter()
-        op = emu.parseOpcode(pc)
-        opbytes = emu.readMemory(pc,len(op))
-        if pc == eip or op.mnem == mnem:
-            break
-        emu.stepi()
-    runStep(emu)
-
-def printWriteLog(emu):
-    print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')]))
-
-def selectTest():
-
-    print("The following tests implement T80515 disassembly or emulation.\n\n")
-
-    print("Select Test: \n[0] Disassemble Only \n[1] Emulation \n",)
-    dotest = raw_input()
-    if dotest.isdigit():
-        return int(dotest)
-    else:
-        print("Unknown test selected")
-        sys.exit()
-
-class Iemu(cmd.Cmd):
-    '''
-    wraps an emulator with some basic interface stuff
-    '''
-    def __init__(self, emu):
-        cmd.Cmd.__init__(self)
-        self.repeat = True
-        self.emu = emu
-
-        self.context = {}
-        self.context['cli'] = self
-        self.context['emu'] = self.emu
-
-    def go(self, pc=None, regs=None, mem=None):
-        if pc is not None:
-            self.emu.setProgramCounter(pc)
-
-        if regs is not None:
-            for reg,val in regs.items():
-                self.emu.setRegister(reg, val)
-
-        if mem is not None:
-            for va,data in mem.items():
-                self.emu.writeMemory(va, data)
-
-        self.cmdloop()
-
-    def do_quit(self, line):
-        return False
-
-
-    def emptyline(self):
-        if self.repeat:
-            cmd.Cmd.emptyline(self)
-
-        else:
-            self.do_help("HELP!")
-
-    def default(self, line):
-        info = self.parseline(line)
-        self.context.update(locals())
-
-        try:
-            output = eval(line, globals(), context)
-        except KeyboardException:
-            self.do_quit()
-
-        print(">> " + output)
-
-    def do_run(self, line):
-        count = 30
-        if len(line.strip()):
-            count = int(line)
-
-        runStep(self.emu, count)
-
-    def do_rununtil(self, line):
-        va = None
-        mnem = 'int'
-
-        try:
-            if '0x' in line:
-                va = int(line, 16)
-            else:
-                va = int(line)
-        except ValueError:
-            mnem = line.strip()
-
-        runUntil(self.emu, eip=va, mnem=mnem)
-
 def readString(emu, va, CHUNK=50):
     off = 0
     out = [ emu.readMemory(va + off, CHUNK) ]
@@ -350,6 +69,44 @@ def readString(emu, va, CHUNK=50):
 
     return data[:data.find('\0')]
 
+prehilite = '\x1b[7m'
+posthilite = '\x1b[27m'
+def compare(data1, data2):
+    size = (len(data1), len(data2))[len(data1) > len(data2)]
+
+    out1 = []
+    out2 = []
+    lastres = True
+    for x in range(size):
+        if data1[x] != data2[x]:
+            if lastres:
+                out1.append(prehilite)
+                out2.append(prehilite)
+            lastres = False
+        else:
+            if not lastres:
+                out1.append(posthilite)
+                out2.append(posthilite)
+            lastres = True
+
+        out1.append(data1[x].encode('hex'))
+        out2.append(data2[x].encode('hex'))
+   
+    if len(data1) > len(data2):
+        out1.append(data1[x:].encode('hex'))
+    elif len(data1) > len(data2):
+        out2.append(data2[x:].encode('hex'))
+    
+    if not lastres:
+        out1.append(posthilite)
+        out2.append(posthilite)
+
+    print(''.join(out1))
+    print(''.join(out2))
+
+
+#######  replacement functions.  can set these in TestEmulator().call_handlers 
+#######  to execute these in python instead of the supporting library
 #### WOW these are fux0rd.  ARM specific.  FIXME: use calling convention stuff.
 def memset(emu, op=None):
     data = ('%c' % emu.getRegisterByName('r1')) * emu.getRegisterByName('r2')
@@ -411,8 +168,6 @@ def retneg1(emu, op):
     emu.setRegisterByName('r0', -1)
 
 
-
-
 def syslog(emu, op=None):
     loglvl = emu.getRegisterByName('r0')
     string = readString(emu, emu.getRegisterByName('r1'))
@@ -428,51 +183,55 @@ def syslog(emu, op=None):
             print("\t" + readString(emu, s))
 
 
-prehilite = '\x1b[7m'
-posthilite = '\x1b[27m'
-def compare(data1, data2):
-    size = (len(data1), len(data2))[len(data1) > len(data2)]
-
-    out1 = []
-    out2 = []
-    lastres = True
-    for x in range(size):
-        if data1[x] != data2[x]:
-            if lastres:
-                out1.append(prehilite)
-                out2.append(prehilite)
-            lastres = False
-        else:
-            if not lastres:
-                out1.append(posthilite)
-                out2.append(posthilite)
-            lastres = True
-
-        out1.append(data1[x].encode('hex'))
-        out2.append(data2[x].encode('hex'))
-   
-    if len(data1) > len(data2):
-        out1.append(data1[x:].encode('hex'))
-    elif len(data1) > len(data2):
-        out2.append(data2[x:].encode('hex'))
-    
-    if not lastres:
-        out1.append(posthilite)
-        out2.append(posthilite)
-
-    print(''.join(out1))
-    print(''.join(out2))
-
-
 class TestEmulator:
     def __init__(self, emu, verbose=False):
         self.XWsnapshot = {}
+        self.cached_mem_locs = []
         self.call_handlers = {}
         self.verbose = verbose
         self.emu = emu
 
-    def XW(self, tracer, address, length = 32, dwperline = 8, snapshot=0):
+    def printMemStatus(self, op=None, use_cached=False):
+        emu = self.emu
+        pc = emu.getProgramCounter()
+        SP = emu.getStackCounter()
+        if op is None:
+            return
 
+        done = []
+        if use_cached:
+            addrs = self.cached_mem_locs
+        else:
+            addrs = []
+            for oper in op.opers:
+                try:
+                    # value
+                    addr = oper.getOperValue(op, emu)
+                    if type(addr) in (int, long):
+                        if addr not in addrs:
+                            addrs.append(addr)
+                    # address
+                    addr = oper.getOperAddr(op, emu)
+                    if addr is not None:
+                        if addr not in addrs:
+                            addrs.append(addr)
+                except Exception as e:
+                    print("error: %s" % e)
+
+        for addr in addrs:
+            if not emu.isValidPointer(addr):
+                if emu.vw.verbose:
+                    if type(addr) in (int, long):
+                        print("No valid memory at address: 0x%x" % addr)
+                    else:
+                        print("No valid memory at address: %s" % addr)
+                continue
+
+            print(XW(emu, addr, snapshot=SNAP_SWAP))
+        self.cached_mem_locs = addrs
+
+
+    def XW(self, tracer, address, length = 32, dwperline = 8, snapshot=0):
         output = []
         mm = tracer.getMemoryMap(address)
         if mm is None:
@@ -516,7 +275,8 @@ class TestEmulator:
         return "".join(output)
 
 
-    def showPriRegisters(self, emu, snapshot=SNAP_NORM):
+    def showPriRegisters(self, snapshot=SNAP_NORM):
+        emu = self.emu
         print("\nRegisters:")
         reggrps = emu.vw.arch.archGetRegisterGroups()
         for name, gen_regs in reggrps:
@@ -689,7 +449,7 @@ class TestEmulator:
                     showafter = False
                 else:
                     # do all the interface stuff here:
-                    showPriRegisters(emu, snapshot=SNAP_SWAP)
+                    self.showPriRegisters(snapshot=SNAP_SWAP)
                     #showFlags(emu) # ARM fails this right now.
                     try:
                         printMemStatus(emu, op)
@@ -703,10 +463,10 @@ class TestEmulator:
                     except Exception as e:
                         print("ERROR rendering opcode: %r" % e)
 
-                    extra = getNameRefs(op, emu)
+                    extra = self.getNameRefs(op)
 
                     opbytes = emu.readMemory(pc,len(op))
-                    print("%.4x\t%20s\t%s\t%s"%(pc,sp.hexText(opbytes),mcanv.strval, extra))
+                    print("%.4x\t%20s\t%s\t%s"%(pc,hexlify(opbytes),mcanv.strval, extra))
 
                     print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "
@@ -724,7 +484,7 @@ class TestEmulator:
                         tova = None
                         moveon = False
 
-                        uinp = raw_input(prompt)
+                        uinp = input(prompt)
                         while len(uinp) and not (moveon or quit or emuBranch):
                             try:
                                 if uinp == "q":
@@ -858,7 +618,7 @@ class TestEmulator:
                                 traceback.print_exc()
 
                             #self.printStats(i)
-                            uinp = raw_input(prompt)
+                            uinp = input(prompt)
 
                 if quit:
                     self.printStats(i)
@@ -901,7 +661,7 @@ class TestEmulator:
                     # print the updated latest stuff....
                     if showafter:
                         try:
-                            extra = getNameRefs(op, emu)
+                            extra = self.getNameRefs(op)
                             if len(extra):
                                 print("after:\t%s\t%s"%(mcanv.strval, extra))
 
@@ -933,11 +693,12 @@ class TestEmulator:
             data = '\t'.join(args)
             print(data)
 
-    def getNameRefs(self, op, emu):
+    def getNameRefs(self, op):
+        emu = self.emu
         extra = ''
         ###  HACK: NOT FOR PUBLIC CONSUMPTION:
-        taintPause = emu._pause_on_taint
-        emu._pause_on_taint = False
+        #taintPause = emu._pause_on_taint
+        #emu._pause_on_taint = False
         try:
 
             for operidx, oper in enumerate(op.opers):
@@ -960,12 +721,12 @@ class TestEmulator:
                         extra += '\t; &$%d = %r' % (operidx, dopnm)
         except Exception as e:
             print("getNameRefs: ERROR: %r" % e)
-        finally:
-            emu._pause_on_taint = taintPause
+        #finally:
+        #    emu._pause_on_taint = taintPause
         return extra
 
-    def runUntil(emu, eip=0, mnem="int", maxstep=1000000):
-        global op
+    def runUntil(self, eip=0, mnem=None, maxstep=1000000):
+        emu = self.emu
         for i in range(maxstep):
             pc = emu.getProgramCounter()
             op = emu.parseOpcode(pc)
@@ -981,3 +742,4 @@ class TestEmulator:
 
 if __name__ == "__main__":
     main(sys.argv)
+
