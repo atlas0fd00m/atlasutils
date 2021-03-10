@@ -67,7 +67,7 @@ class tracebin:
             if (sec.sh_flags & 4 and sec.name[:4] != '.plt' and sec.name[:5] != '.init'):
                 start = sec.sh_addr
                 end   = sec.sh_addr+sec.sh_size
-                print ("    appending 'local' section...  %s (%x - %x)"%(sec.name, start, end))
+                print("    appending 'local' section...  %s (%x - %x)"%(sec.name, start, end))
                 self.locsec.append((start, end))
         return True
             
@@ -86,7 +86,7 @@ class tracebin:
         mytextend = 0
         for x in self.me.getMemoryMaps():
             if binexe in x[3]:
-                print ("Tracing:  %s compare %x to %s at %x"%(binexe,mytextstart,x[3], x[0]))
+                print("Tracing:  %s compare %x to %s at %x"%(binexe,mytextstart,x[3], x[0]))
                 if mytextstart > x[0]:
                     mytextstart = x[0]
                 if mytextend < (x[0]+x[1]):
@@ -103,39 +103,39 @@ class tracebin:
                 numaddr += (source.index * source.scale)
             if source.base:
                 source = source.base
-            #print >>outfile,("DEBUG-sib: %x"%numaddr)
+            #print("DEBUG-sib: %x"%numaddr, file=outfile)
         if isinstance(source, Expression):
             if source.disp:
                 numaddr += source.disp.value
             if source.base:
                 source = source.base
             dereference = True
-            #print >>outfile,("DEBUG-expr: %x"%numaddr)
+            #print("DEBUG-expr: %x"%numaddr, file=outfile)
         if isinstance(source, SIB):
             if source.index:
                 if isinstance(source.index, Register):
                     numaddr += (self.getRegisterValue(source.index))
                 else:
-                    print source.index
+                    print(source.index)
                     numaddr += (source.index * source.scale)
             if source.base:
                 source = source.base
-            #print >>outfile,("DEBUG-sib: %x"%numaddr)
+            #print("DEBUG-sib: %x"%numaddr, file=outfile)
         if isinstance(source, Register):
             numaddr += (self.getRegisterValue(source))
-            #print >>outfile,("DEBUG-reg: %x"%numaddr)
+            #print("DEBUG-reg: %x"%numaddr, file=outfile)
         elif isinstance(source, Address):
             numaddr += source.value
             if source.relative:
                 numaddr += self.eip + self.op.off
-            #print >>outfile,("DEBUG-addr: %x"%numaddr)
+            #print("DEBUG-addr: %x"%numaddr, file=outfile)
         if dereference:
             try:
                 numaddr = struct.unpack("L",me.readMemory(numaddr, 4))[0]
-                #print >>outfile,("DEBUG-deref: %x"%numaddr)
+                #print("DEBUG-deref: %x"%numaddr, file=outfile)
             except:
-                #print >>outfile,("DEBUG-deref-except: %x"%numaddr)
-                #print >>stderr,("DEBUG-deref-except: %x"%numaddr)
+                #print("DEBUG-deref-except: %x"%numaddr, file=outfile)
+                #print("DEBUG-deref-except: %x"%numaddr, file=stderr)
                 pass
                 
         return numaddr
@@ -152,7 +152,7 @@ class tracebin:
                     mask = 0xff00
                 reg = 'e%cx'%reg[0]                             # vtrace doesn't like al/ah and possibly ax
             return (self.me.getRegisterByName(reg) & mask)
-            #print >>outfile,("DEBUG-reg: %x"%numaddr)
+            #print(("DEBUG-reg: %x"%numaddr), file=outfile)
 
     def localstepi(self, outfile = stdout):
         me = self.me
@@ -162,13 +162,13 @@ class tracebin:
             try:
                 threads = me.getThreads()
             except:
-                print >>stderr,("Error: Thread list changed in middle of getThreads()")
+                print(("Error: Thread list changed in middle of getThreads()"), file=stderr)
         for t in threads:
             values = ""
             me.selectThread(t)
             me.stepi()
             self.eip = me.getProgramCounter()
-            #print >>outfile,("debug: %x"%self.eip)
+            #print(("debug: %x"%self.eip), file=outfile)
             try:
               self.op = Opcode(me.readMemory(self.eip, 18))
               if self.isLocal(self.eip):
@@ -202,7 +202,7 @@ class tracebin:
                         except:
                             print("ERROR READING MEMORY AT %x:"%num)
                     values += " %s"%(temp)
-              print >>outfile,("thread %8d: %x   (%s)\t\t %s \t%s"%(t,self.eip,me.getSymByAddr(self.eip), self.op.printOpcode(0, self.eip), values))
+              print("thread %8d: %x   (%s)\t\t %s \t%s"%(t,self.eip,me.getSymByAddr(self.eip), self.op.printOpcode(0, self.eip), values), file=outfile)
               if self.op.opcode[:2] == "ca" or (self.op.opcode[0] == 'j' and abs(self.lastcall[0] - self.eip) < 4):
                 dereference = False
                 add = ""
@@ -211,36 +211,36 @@ class tracebin:
                 if isinstance(source, SIB):
                     numaddr += BREAKIT + source.index
                     source = source.index
-                    print >>outfile,("DEBUG-sib: %x"%numaddr)
+                    print(("DEBUG-sib: %x"%numaddr), file=outfile)
                 if isinstance(source, Expression):
                     if source.disp:
                         numaddr += source.disp.value
                     if source.base:
                         source = source.base
                     dereference = True
-                    print >>outfile,("DEBUG-expr: %x"%numaddr)
+                    print(("DEBUG-expr: %x"%numaddr), file=outfile)
                 if isinstance(source, Register):
                     numaddr += self.me.getRegisterByName(source.name)
-                    print >>outfile,("DEBUG-reg: %x"%numaddr)
+                    print(("DEBUG-reg: %x"%numaddr), file=outfile)
                 elif isinstance(source, Address):
                     numaddr += source.value
                     if source.relative:
                         numaddr += self.eip + self.op.off
-                    print >>outfile,("DEBUG-addr: %x"%numaddr)
+                    print(("DEBUG-addr: %x"%numaddr), file=outfile)
                 
                 if dereference:
                     try:
                         numaddr = struct.unpack("L",me.readMemory(numaddr, 4))[0]
-                        print >>outfile,("DEBUG-deref: %x"%numaddr)
+                        print(("DEBUG-deref: %x"%numaddr), file=outfile)
                     except:
-                        print >>outfile,("DEBUG-deref-except: %x"%numaddr)
+                        print(("DEBUG-deref-except: %x"%numaddr), file=outfile)
                     
                 target = me.getSymByAddr(numaddr)
-                print >>outfile,("\t\t %x(%s) %s TO %s -- %x(%s)  \t\t\t (%s)"%(self.eip, self.isLocal(self.eip),self.op.opcode, self.op.source.printOpcode(0, self.eip), numaddr, self.isLocal(numaddr), target))
+                print( ("\t\t %x(%s) %s TO %s -- %x(%s)  \t\t\t (%s)"%(self.eip, self.isLocal(self.eip),self.op.opcode, self.op.source.printOpcode(0, self.eip), numaddr, self.isLocal(numaddr), target)), file=outfile)
                 try:    ### LINUX ONLY... fugly
                     if lookupPLT(numaddr) == '__libc_start_main':
                         main = struct.unpack("L", me.readMemory(me.getRegisterByName('esp'), 4))[0]
-                        print >>outfile,("\t\t Setting main() Breakpoint at %x"%(main))
+                        print(("\t\t Setting main() Breakpoint at %x"%(main)), file=outfile)
                         me.addBreakpoint(Breakpoint(main))
                 except:
                     pass
@@ -250,18 +250,18 @@ class tracebin:
                     else:
                         baddr = self.eip+self.op.off
                     brk = Breakpoint(baddr)
-                    print >>outfile,("\t\t Going Remote...  Setting Breakpoint at %x"%(baddr))
+                    print(("\t\t Going Remote...  Setting Breakpoint at %x"%(baddr)), file=outfile)
                     try:
                         me.addBreakpoint(brk)
                     except:
                         pass
                     me.run()
-                    print repr(me)
+                    print(repr(me))
                     me.removeBreakpoint(brk)
                 else:
                     self.lastcall = (numaddr, self.eip + self.op.off)
                 #except:
-                    #print >>stderr,("ERROR READING MEMORY LOCATION: %x"%eip)
+                    #print(("ERROR READING MEMORY LOCATION: %x"%eip), file=stderr)
             except:
                 x,y,z = sys.exc_info()
                 sys.excepthook(x,y,z)
@@ -319,7 +319,7 @@ if __name__ == "__main__":
     if arg[1] == 'V':
         self.verbose = True
     else:
-        print >>stderr,("ERROR: Unknown Parameter: %s"%arg)
+        print(("ERROR: Unknown Parameter: %s"%arg), file=stderr)
 
   name = argv[1]
   tracebin(argv).go()

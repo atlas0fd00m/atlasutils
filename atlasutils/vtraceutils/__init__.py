@@ -8,8 +8,8 @@ try:
     from atlasutils.disassutils import *
     from disassemble import *
 except:
-    print exc_info()
-    print "Initializing vtraceutils *without* libdisassemble... this could be bad."
+    print(exc_info())
+    print("Initializing vtraceutils *without* libdisassemble... this could be bad.")
 
 BITS = 32
 AddrFmt='L'
@@ -32,10 +32,10 @@ class DisplayBreaker(Breakpoint):
         
     def notify(self, event, trace):
         trace.running = False
-        print "PID: %d hit break: %s" % (trace.pid, hex(self.address))
+        print("PID: %d hit break: %s" % (trace.pid, hex(self.address)))
         select([],[],[],1)
-        print printStuff(trace)
-        print XI(trace, self.address, 5)
+        print(printStuff(trace))
+        print(XI(trace, self.address, 5))
         
 class StackSysCallBreaker(Breakpoint):
     def __init__(self, tracer, syscallname = 'libc.memcpy'):
@@ -78,9 +78,9 @@ def stepi(me):
         me.selectThread(t)
         try:
             me.stepi()
-            print "thread %8d: %x"%(t,me.getProgramCounter())
-        except Exception,e:
-            print "thread %8d: ERROR: %s"%(t, e)
+            print("thread %8d: %x"%(t,me.getProgramCounter()))
+        except Exception as e:
+            print("thread %8d: ERROR: %s"%(t, e))
     me.selectThread(origThread)
 
 def prettystepi(me, outfile = stderr):
@@ -89,14 +89,14 @@ def prettystepi(me, outfile = stderr):
         me.selectThread(t)
         me.stepi()
         eip = me.getProgramCounter()
-        print >>outfile,("thread %8d: %x   (%s)"%(t,eip,me.getSymByAddr(eip)))
+        print("thread %8d: %x   (%s)"%(t,eip,me.getSymByAddr(eip)), file=outfile)
     me.selectThread(origThread)
 
 def eips(me):
     origThread = me.getMeta('ThreadId')
     for t in me.getThreads():
         me.selectThread(t)
-        print "thread %8d: %x"%(t,me.getProgramCounter())
+        print("thread %8d: %x"%(t,me.getProgramCounter()))
     me.selectThread(origThread)
 
 
@@ -159,9 +159,9 @@ def traceme(me, untilop=None, untileip=None, untilreg=('eax',None), locs = {}, p
         triggerOnAnyThread  - Apply 'until-' clauses to any thread.  If False, only the original thread will be compared to stop tracing.
     """
     if (not (printTrace or untilop or untileip or untilreg[1])):
-        printTrace=True #set the default.  If none specified, print if no until-s.  If there are until-s, default to no printing unless specified
+        printTrace=True #set the default.  If none specified, print(if no until-s.  If there are until-s, default to no printing unless specified)
         
-    print >>err,("TRACING EXECUTION... Press CTRL-C to stop.  Accounting will be stored in 'locs' and returned")
+    print("TRACING EXECUTION... Press CTRL-C to stop.  Accounting will be stored in 'locs' and returned", file=err)
     origThread = me.getMeta('ThreadId')
     last=me.getProgramCounter()
     cont=True
@@ -180,8 +180,8 @@ def traceme(me, untilop=None, untileip=None, untilreg=('eax',None), locs = {}, p
                     me.selectThread(i)
                     me.stepi()
                     if (printAllThreads or i == origThread):
-                        print >>out,printStuff(me)
-                        print >>out, t
+                        print(printStuff(me), file=out)
+                        print( t, file=out)
                         
                         
                     if (triggerOnAnyThread or i == origThread):
@@ -218,18 +218,18 @@ def traceme(me, untilop=None, untileip=None, untilreg=('eax',None), locs = {}, p
                                 if (me.getRegisters()[untilreg[0]] == untilreg[1]):
                                     cont=False
                                     break
-            except KeyboardInterrupt, k:
+            except KeyboardInterrupt as  k:
                 me.selectThread(origThread)
                 break
             except:
-                print >>stderr,("**************======== Opcode Not Printed... (bad or not supported?) ========**************")
+                print("**************======== Opcode Not Printed... (bad or not supported?) ========**************", file=stderr)
                 x,y,z = exc_info()
                 excepthook(x,y,z)
             
             
             
-    except KeyboardInterrupt, e:
-        print >>err,("Trace Complete.  Look at 'locs'")
+    except KeyboardInterrupt as  e:
+        print("Trace Complete.  Look at 'locs'", file=err)
     if printTrace:
         printLocs(locs, out)
     if disasstrace:
@@ -262,20 +262,20 @@ def getOperandValue(trace, opcode, operand, eip):
                 numaddr += (souce.index * source.scale)
             if source.base:
                 source = source.base
-            #print >>outfile,("DEBUG-sib: %x"%numaddr)
+            #print("DEBUG-sib: %x"%numaddr, file=outfile)
         if isinstance(source, Expression):
             if source.disp:
                 numaddr += source.disp.value
             if source.base:
                 source = source.base
             dereference = True
-            #print >>outfile,("DEBUG-expr: %x"%numaddr)
+            #print("DEBUG-expr: %x"%numaddr, file=outfile)
         if isinstance(source, SIB):
             if source.index:
                 numaddr += (souce.index * source.scale)
             if source.base:
                 source = source.base
-            #print >>outfile,("DEBUG-sib: %x"%numaddr)
+            #print("DEBUG-sib: %x"%numaddr, file=outfile)
         if isinstance(source, Register):
             reg = source.name
             mask = 0xffffffff       # 32 bit only
@@ -288,19 +288,19 @@ def getOperandValue(trace, opcode, operand, eip):
                     mask = 0xff00
                 reg = 'e%cx'%reg[0]                             # vtrace doesn't like al/ah and possibly ax
             numaddr += (trace.getRegisterByName(reg) & mask)
-            #print >>outfile,("DEBUG-reg: %x"%numaddr)
+            #print("DEBUG-reg: %x"%numaddr, file=outfile)
         elif isinstance(source, Address):
             numaddr += source.value
             if source.relative:
                 numaddr += eip + opcode.off
-            #print >>outfile,("DEBUG-addr: %x"%numaddr)
+            #print("DEBUG-addr: %x"%numaddr, file=outfile)
         if dereference:
             try:
                 numaddr = struct.unpack("L",me.readMemory(numaddr, 4))[0]
-                #print >>outfile,("DEBUG-deref: %x"%numaddr)
+                #print("DEBUG-deref: %x"%numaddr, file=outfile)
             except:
-                #print >>outfile,("DEBUG-deref-except: %x"%numaddr)
-                #print >>stderr,("DEBUG-deref-except: %x"%numaddr)
+                #print("DEBUG-deref-except: %x"%numaddr, file=outfile)
+                #print("DEBUG-deref-except: %x"%numaddr, file=stderr)
                 pass
                 
         return numaddr
@@ -314,7 +314,7 @@ def printLocs(locs, out=stdout):
         lkeys = locs[t].keys()
         lkeys.sort()
         for i in lkeys:
-            print >>out,("(Thread %d): %x:%d"%(t, i, locs[t][i]))
+            print("(Thread %d): %x:%d"%(t, i, locs[t][i]), file=out)
 
 
 def gotoOpcode(me, inbtwn=False, srch=['call'], file = stdout):
@@ -351,24 +351,24 @@ def getinst(me):
 
 def si(me):
     me.stepi()
-    print printStuff(me)
+    print(printStuff(me))
 
 
 def ni(me):
     eip = me.getProgramCounter()
-    #print >>outfile,("debug: %x"%self.eip)
+    #print("debug: %x"%self.eip, file=outfile)
     op = Opcode(me.readMemory(eip, 18))
     if op.opcode[:2] == "ca":
         baddr = eip+op.off
         brk = OneTimeBreak(baddr)
-        #print >>outfile,("\t\t Going Remote...  Setting Breakpoint at %x"%(baddr))
+        #print("\t\t Going Remote...  Setting Breakpoint at %x"%(baddr), file=outfile)
         me.addBreakpoint(brk)
         me.run()
-        #print repr(me)
+        #print(repr(me))
         #me.removeBreakpoint(brk)
     else:
         me.stepi()
-    print printStuff(me)
+    print(printStuff(me))
 
             
 
@@ -478,7 +478,7 @@ def printStuff(me, eachThread=False, width=8):
 def atch(procname, me = getTrace(), procno = None):
   for proc in me.ps() :
     if (proc[1].split(" ")[0].find(procname) >-1):
-      print ("Attaching to %d: %s"%(proc[0],proc[1]))
+      print(("Attaching to %d: %s"%(proc[0],proc[1])))
       try:
         me.attach(proc[0])  
         me.registerNotifier(vtrace.NOTIFY_ALL, VerboseNotifier())
@@ -495,7 +495,7 @@ def atch(procname, me = getTrace(), procno = None):
 def bt(me):
     print("Stack Trace: (current thread)")
     for i in me.getStackTrace(): 
-        print "%x : %x"%i
+        print("%x : %x"%i)
         
 
 def findRET(trace, stackptr = 0):
@@ -524,7 +524,7 @@ def findRET(trace, stackptr = 0):
                     opchar = buf[x]
                     #stderr.write("  %x%x  "%(x,ord(opchar)))
                     if (opchar == '\xff' and (ord(buf[x+1])>>4) & 3 == 1) or opchar == '\xe8' or opchar == '\x9a':
-                        #print >>stderr,(hexText(buf[x:]))
+                        #print(hexText(buf[x:]), file=stderr)
                         op = Opcode(buf, x)
                         #stderr.write("*(%x:%x:%s:%d+%d=%d)\n"%(stackptr,address, op.opcode, op.getSize(), x,BUFLEN+1))
                         #if the length is correct and it's a call....  take our win... in one of two ways
@@ -534,13 +534,13 @@ def findRET(trace, stackptr = 0):
                             else:
                                 #  recurses the Operand information to return a real value
                                 target = getOperandValue(trace, op, op.source, address-op.off)  
-                                #print >>stderr,("\n"+op.printOpcode(0)+"\n%x : %x"%(address, target))
+                                #print("\n"+op.printOpcode(0)+"\n%x : %x"%(address, target), file=stderr)
                                 mmap = trace.getMemoryMap(target)
                                 if mmap != None and "stack" not in mmap[3] :        #  Is it a valid address?
                                     # Possibly Check the Target of the call
                                     #   * Does it point to this address or a opcode for a jmp to this address?
                                     #       Unfortunately, this is costly and not entirely accurate
-                                    print >>stderr,("foundRET: (s/r/c)\t%x:%x:%x (%s - %s)\n"%(stackptr,address,target, op.printOpcode(0, address-10+x), trace.getSymByAddr(target)))
+                                    print("foundRET: (s/r/c)\t%x:%x:%x (%s - %s)\n"%(stackptr,address,target, op.printOpcode(0, address-10+x), trace.getSymByAddr(target)), file=stderr)
                                     return stackptr
                         else:
                             pass
@@ -554,7 +554,7 @@ def findRET(trace, stackptr = 0):
 trace=me
 esp = trace.getRegisterByName('esp')
 op=None
-#### loop through RET and see what goes where, and print the opcode preceeding ret
+#### loop through RET and see what goes where, and print(the opcode preceeding ret)
 try:
     while True:
         address = findRET(me,esp)
