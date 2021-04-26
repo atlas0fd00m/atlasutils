@@ -89,13 +89,13 @@ def compare(data1, data2):
                 out2.append(posthilite)
             lastres = True
 
-        out1.append(data1[x].encode('hex'))
-        out2.append(data2[x].encode('hex'))
+        out1.append(data1[x:x+1].hex())
+        out2.append(data2[x:x+1].hex())
    
     if len(data1) > len(data2):
-        out1.append(data1[x:].encode('hex'))
+        out1.append(data1[x:].hex())
     elif len(data1) > len(data2):
-        out2.append(data2[x:].encode('hex'))
+        out2.append(data2[x:].hex())
     
     if not lastres:
         out1.append(posthilite)
@@ -207,7 +207,7 @@ class TestEmulator:
                 try:
                     # value
                     addr = oper.getOperValue(op, emu)
-                    if type(addr) in (int, long):
+                    if type(addr) == int:
                         if addr not in addrs:
                             addrs.append(addr)
                     # address
@@ -220,14 +220,14 @@ class TestEmulator:
 
         for addr in addrs:
             if not emu.isValidPointer(addr):
-                if emu.vw.verbose:
-                    if type(addr) in (int, long):
-                        print("No valid memory at address: 0x%x" % addr)
-                    else:
-                        print("No valid memory at address: %s" % addr)
+                #if emu.vw.verbose:
+                #    if type(addr) == int:
+                #        print("No valid memory at address: 0x%x" % addr)
+                #    else:
+                #        print("No valid memory at address: %s" % addr)
                 continue
 
-            print(XW(emu, addr, snapshot=SNAP_SWAP))
+            print(self.XW(emu, addr, snapshot=SNAP_SWAP))
         self.cached_mem_locs = addrs
 
 
@@ -242,7 +242,7 @@ class TestEmulator:
             goodbcnt = (mmva+mmsz-address)
             diff = (length*4) - goodbcnt
             bs = tracer.readMemory(address, goodbcnt)
-            bs += 'A' * diff
+            bs += b'A' * diff
 
         else:
             bs = tracer.readMemory(address, length*4)
@@ -250,7 +250,7 @@ class TestEmulator:
         for i in range(length):
             addr = address + (i * 4)
             if (i % dwperline == 0):
-                output.append( "%.08x:\t "%(addr))
+                output.append("%.08x:\t "%(addr))
 
             data = bs[i*4:(i*4)+4]
 
@@ -265,7 +265,7 @@ class TestEmulator:
 
             if snapshot in (SNAP_CAP, SNAP_SWAP):
                 self.XWsnapshot[addr] = data
-            output.append(pre + bs[i*4:(i*4)+4].encode('hex') + post)
+            output.append(pre + bs[i*4:(i*4)+4].hex() + post)
 
             if ((i+1) % dwperline == 0):
                 output.append("\n")
@@ -394,7 +394,7 @@ class TestEmulator:
         if tracedict is None:
             tracedict = {}
         else:
-            print("tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) in (int,long)])))
+            print("tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) == int])))
 
 
         nonstop = 0
@@ -450,9 +450,9 @@ class TestEmulator:
                 else:
                     # do all the interface stuff here:
                     self.showPriRegisters(snapshot=SNAP_SWAP)
-                    #showFlags(emu) # ARM fails this right now.
+                    self.showFlags() # ARM fails this right now.
                     try:
-                        printMemStatus(emu, op)
+                        self.printMemStatus(op)
                     except Exception as e:
                         print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
 
@@ -511,7 +511,7 @@ class TestEmulator:
                                     break
 
                                 elif uinp == 'stack':
-                                    stackDump(emu)
+                                    self.stackDump()
                                     moveon = True
                                     break
 
@@ -574,7 +574,7 @@ class TestEmulator:
 
                                         va = parseExpression(emu, expr)
                                         data = emu.readMemory(va, size)
-                                        print("[%s:%s] == %r" % (expr, size, data.encode('hex')))
+                                        print("[%s:%s] == %r" % (expr, size, data.hex()))
                                     except Exception as e:
                                         print("ERROR: %r" % e)
 
@@ -607,7 +607,7 @@ class TestEmulator:
                                         lcls = locals()
                                         lcls.update(emu.getRegisters())
                                         out = eval(uinp, globals(), lcls)
-                                        if type(out) in (int,long):
+                                        if type(out) == int:
                                             print(hex(out))
                                         else:
                                             print(out)
@@ -665,7 +665,7 @@ class TestEmulator:
                             if len(extra):
                                 print("after:\t%s\t%s"%(mcanv.strval, extra))
 
-                            printMemStatus(emu, op, use_cached=True)
+                            self.printMemStatus(op, use_cached=True)
                         except Exception as e:
                             print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
 
@@ -703,7 +703,7 @@ class TestEmulator:
 
             for operidx, oper in enumerate(op.opers):
                 opval = oper.getOperValue(op, emu)
-                if type(opval) in (int, long):
+                if type(opval) == int:
                     opnm = emu.vw.getName(opval)
                     if opnm is None and hasattr(emu, 'getVivTaint'):
                         opnm = emu.getVivTaint(opval)
@@ -712,7 +712,7 @@ class TestEmulator:
                         extra += '\t; $%d = %r' % (operidx, opnm)
 
                 dopval = oper.getOperAddr(op, emu)
-                if type(dopval) in (int, long):
+                if type(dopval) == int:
                     dopnm = emu.vw.getName(dopval)
                     if opnm is None and hasattr(emu, 'getVivTaint'):
                         opnm = emu.getVivTaint(opval)
@@ -737,7 +737,7 @@ class TestEmulator:
         runStep(emu)
 
     def printWriteLog(emu):
-        print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.encode('hex'),d) for x,y,d in emu.path[2].get('writelog')]))
+        print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.hex(),d) for x,y,d in emu.path[2].get('writelog')]))
 
 
 if __name__ == "__main__":
