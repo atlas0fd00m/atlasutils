@@ -41,11 +41,21 @@ import vivisect.symboliks.emulator as vs_emu
 import vivisect.symboliks.analysis as vs_anal
 import vivisect.symboliks.archs.i386 as vs_i386
 from vivisect.const import *
+from pprint import pprint
 
+if sys.version_info.major == 3:
+    from importlib import reload
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+from binascii import hexlify, unhexlify
+
+loghandler = logging.StreamHandler()
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s', handlers=[loghandler])
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
+loghandler.addFilter(lambda record: not record.name.startswith("parso"))
+
+#formatter = get_ipython().display_formatter.formatters['text/plain']
+#formatter.for_type(int, lambda n, p, cycle: p.text("0x%x" % n))
 
 # set up python path to include Vivisect's Scripts and Extensions, as well as VDB Scripts
 for pathvar in ('VIV_SCRIPT_PATH', 'VIV_EXT_PATH', 'VDB_SCRIPT_PATH'):
@@ -99,17 +109,17 @@ def printVWEs(evts, etype=None, paginate=50):
     else:
         reprevts = [(vwes.get(evt), einfo) for evt, einfo in evts]
 
-    print "\tlen: %d" % len(reprevts)
+    print("\tlen: %d" % len(reprevts))
     for eidx in xrange(len(reprevts)):
         evt, einfo = reprevts[eidx]
-        print "%.7d  %-20s: %r" %(eidx, evt, einfo)
+        print("%.7d  %-20s: %r" %(eidx, evt, einfo))
         if not ((eidx+1) % paginate):
             raw_input("PAUSE... Press Enter")
 
 
 def printInterestingVWEs(evts, paginate=50):
     for evt in (VWE_ADDFUNCTION, VWE_SETNAME, VWE_COMMENT, VWE_SETMETA, VWE_SETFILEMETA, VWE_SETVASETROW, VWE_CHAT, ):
-        print "==== %s ====" % (vwes.get(evt))
+        print("==== %s ====" % (vwes.get(evt)))
         printVWEs(evts, evt, paginate)
         raw_input("---- DONE ----")
 
@@ -126,13 +136,13 @@ def mergeInterestingEvents(vw, evts, offset = 0):
 
     for efunctype, (funcinfo) in functions:
         funcva = funcinfo[0]
-        print "FUNCTION: 0x%x" % (funcva)
+        print("FUNCTION: 0x%x" % (funcva))
         locs = [(evt, einfo) for evt, einfo in evts if VWE_ADDLOCATION==evt and einfo[0]==funcva]
         if len(locs):
-            #print locs
+            #print(locs)
             evt, loc = locs[-1]
             locva, lsz, ltype, linfo = loc
-            #print "evt, loc:  (%r, %r)" % ((evt, loc))
+            #print("evt, loc:  (%r, %r)" % ((evt, loc)))
             #raw_input("so?")
             #vw._fireEvent(evt, loc)
             vw.makeCode(locva+offset, arch=linfo)
@@ -145,7 +155,7 @@ def mergeInterestingEvents(vw, evts, offset = 0):
     comments = [(vwes.get(evt), einfo) for evt, einfo in evts if VWE_COMMENT==evt]
     for cevt, einfo in comments:
         va, impcmt = einfo
-        print "COMMENT: 0x%x: %s" % (va, impcmt)
+        print("COMMENT: 0x%x: %s" % (va, impcmt))
         newva = va + offset
         insertComment(vw, newva, impcmt)
 
@@ -153,9 +163,9 @@ def mergeInterestingEvents(vw, evts, offset = 0):
     names = [(vwes.get(evt), einfo) for evt, einfo in evts if VWE_SETNAME==evt]
     for nevt, einfo in names:
         va, impname = einfo
-        print "NAME: 0x%x: %s" % (va, impname)
+        print("NAME: 0x%x: %s" % (va, impname))
         if impname == "sub_%08x" % va:
-            print "skipping..."
+            print("skipping...")
             continue
 
         newva = va + offset
@@ -171,7 +181,7 @@ def vprint(strthing):
     '''
     this helps emulate a Viv script, which has vprint() strapped into the globals
     '''
-    print strthing
+    print(strthing)
 
 def _setVar_cb(symobj, ctx):
     '''
@@ -205,7 +215,7 @@ def itersymviewpaths(spaths):
     '''
     for path in spaths:
         x=[eff.reduce() for eff in path[1]]
-        print "\n".join(["%x: %s" %(eff.va,str(eff)) for eff in path[1] if not isinstance(eff, SetVariable) or not eff.varname.startswith('efl')])
+        print("\n".join(["%x: %s" %(eff.va,str(eff)) for eff in path[1] if not isinstance(eff, SetVariable) or not eff.varname.startswith('efl')]))
         raw_input("\n PRESS ENTER FOR NEXT PATH\n")
 
 def itersymview(funcva, args=None, maxpath=1000):
@@ -220,14 +230,14 @@ def symrepr(syms):
     step through a list of symbolik effects, and print out the REPR of interesting ones (ignoring eflag updates, etc...)
     '''
     [e.reduce() for e in syms]
-    print "\n".join([repr(e) for e in syms if e.efftype != 1 or not e.varname.startswith('efl')])
+    print("\n".join([repr(e) for e in syms if e.efftype != 1 or not e.varname.startswith('efl')]))
 
 def symview(syms):
     '''
     step through a list of symbolik effects, and print out the STR of interesting ones (ignoring eflag updates, etc...)
     '''
     [e.reduce() for e in syms]
-    print "\n".join([str(e) for e in syms if e.efftype != 1 or not e.varname.startswith('efl')])
+    print("\n".join([str(e) for e in syms if e.efftype != 1 or not e.varname.startswith('efl')]))
 
 def symreproutputs(syms):
     '''
@@ -243,7 +253,7 @@ def symreproutputs(syms):
             symaddr = e.symaddr
             if symaddr.isDiscrete() and symaddr.solve() & 0xbfbf0000 == 0xbfbf0000:
                 continue
-        print repr(e)
+        print(repr(e))
 
 def symviewoutputs(syms):
     '''
@@ -259,7 +269,7 @@ def symviewoutputs(syms):
             symaddr = e.symaddr
             if symaddr.isDiscrete() and symaddr.solve() & 0xbfbf0000 == 0xbfbf0000:
                 continue
-        print str(e)
+        print(str(e))
 
 def symeff(eff):
     '''
@@ -309,21 +319,21 @@ def revert(vw, skipsaves=0):
         numsaves -= 1
 
     if idx == 0:
-        print "No more reverts can be done on this workspace."
+        print("No more reverts can be done on this workspace.")
         return
 
     if idx == len(vw._event_list) - 1:
-        print "Nothing done.  Already at last save (see numsaves argument)"
+        print("Nothing done.  Already at last save (see numsaves argument)")
         return
 
-    print "idx: %d: %s" % (idx, repr(vw._event_list[idx][1]))
-    print "Reverting to last save."
+    print("idx: %d: %s" % (idx, repr(vw._event_list[idx][1])))
+    print("Reverting to last save.")
     idx += 1
 
     history.append(vw._event_list[idx:])
     vw._event_list = vw._event_list[:idx]
-    print "Done.  Workspace has Not been saved...  if you went too far, you may be able to salvage the workspace by reloading."
-    print "alternately, chopped events have been saved to the 'history' list"
+    print("Done.  Workspace has Not been saved...  if you went too far, you may be able to salvage the workspace by reloading.")
+    print("alternately, chopped events have been saved to the 'history' list")
 
 def getRemoteWorkspaceDialog(servername=None):
     '''
@@ -365,7 +375,7 @@ def loadRemoteWorkspace(vwname=None, servername=None):
         vwname = getRemoteWorkspaceDialog()
 
     vw = viv_server.getServerWorkspace(wsserver, vwname)
-    print repr(vw.metadata)
+    print(repr(vw.metadata))
     return vw
 
 def listNewVars():
@@ -400,7 +410,7 @@ def stepi(width=8):
         if oper.isDeref():
             addr = oper.getOperAddr(op, emu)
             mem = oper.getOperValue(op, emu)
-            print "PRE:  oper addr: 0x%x      value: 0x%x"% (addr, mem)
+            print("PRE:  oper addr: 0x%x      value: 0x%x"% (addr, mem))
             
     emu.stepi()
 
@@ -408,17 +418,17 @@ def stepi(width=8):
         if oper.isDeref():
             addr = oper.getOperAddr(op, emu)
             mem = oper.getOperValue(op, emu)
-            print "POST: oper addr: 0x%x      value: 0x%x"% (addr, mem)
+            print("POST: oper addr: 0x%x      value: 0x%x"% (addr, mem))
             
     regvalues = [(regname,emu.getRegister(index)) for index, regname in emu._rctx_ids.items() if index< 0xffff]
 
     off = 0
     while off<len(regvalues):
-        print "  ".join(['%-4s: %.4x' %(regname,val) for regname,val in regvalues[off:off+width]])
+        print("  ".join(['%-4s: %.4x' %(regname,val) for regname,val in regvalues[off:off+width]]))
         off += width
 
     op= vw.parseOpcode(emu.getProgramCounter())
-    print "%x:  %s" % (op.va,op)
+    print("%x:  %s" % (op.va,op))
 
 def vwdis(vw, startva, count=50, endva=None):
     off = 0
@@ -433,19 +443,20 @@ def vwdis(vw, startva, count=50, endva=None):
             
             op = vw.parseOpcode(va, arch=ltinfo)
             oplen = len(op)
-            bytez = vw.readMemory(startva+off, len(op)).encode('hex')
-            print "0x%x:\t%30s\t%s" % (op.va, bytez, repr(op))
+            bytez = hexlify(vw.readMemory(startva+off, len(op)))
+            print("0x%x:\t%30s\t%s" % (op.va, bytez, repr(op)))
             off += len(op)
         except envi.SegmentationViolation:
-            print "SegmentationViolation at 0x%x" % (startva+off)
+            print("SegmentationViolation at 0x%x" % (startva+off))
             return
         except Exception as e:  #envi.InvalidInstruction:
-            print e
-            print "0x%x:\t%30s\t  (bad)" % (startva+off, vw.readMemory(startva+off, 1).encode('hex'))
+            print(e)
+            print("0x%x:\t%30s\t  (bad)" % (startva+off, hexlify(vw.readMemory(startva+off, 1))))
             off += 1
             oplen = 1
-        if va <= endva < va+oplen: 
-            break
+        if endva is not None \
+            and va <= endva < va+oplen: 
+                break
 
 def disasm(binstr, offset=0, baseva=0x41410000, arch=envi.ARCH_I386):
     vw = vivisect.VivWorkspace()
@@ -453,7 +464,7 @@ def disasm(binstr, offset=0, baseva=0x41410000, arch=envi.ARCH_I386):
     arch = vw.imem_archs[arch>>16]
     while offset < binlen:
         op = arch.archParseOpcode(binstr, offset, baseva+offset)
-        print "0x%x:\t\t%s" % (op.va, repr(op))
+        print("0x%x:\t\t%s" % (op.va, repr(op)))
         offset += len(op)
 
 def timeit(testfunc, *args, **kwargs):
@@ -461,14 +472,14 @@ def timeit(testfunc, *args, **kwargs):
     try:
         starttime = time.time()
         testfunc(*args, **kwargs)
-    except Exception, e:
-        print "Error: %s" % e
+    except Exception as e:
+        print("Error: %s" % e)
         import sys
         sys.excepthook(*sys.exc_info())
     finally:
         stoptime = time.time()
         tdelta = stoptime - starttime
-        print "Function Completed in %.3fsecs" % (tdelta)
+        print("Function Completed in %.3fsecs" % (tdelta))
     return tdelta
 
 
@@ -504,7 +515,7 @@ def rop_amd64(vw, negoff=0):
     for pattern in patlist:
         for va in vw.searchMemory(pattern.decode('hex')):
             #vwdis(vw, va-negoff, endva=va+len(pattern)-1)
-            #print ""
+            #print("")
             #udata = raw_input("PRESS ENTER or 'next'")
             #if len(udata) and udata[0].lower() == 'n':
             #    break
@@ -521,8 +532,8 @@ def rop_amd64(vw, negoff=0):
                 except ValueError:
                     pass
 
-                except Exception, e:
-                    print type(e)
+                except Exception as e:
+                    print(type(e))
 
                 udata = raw_input("? ")
 
@@ -545,8 +556,8 @@ def rop_i386(vw, startoff=10):
                 except ValueError:
                     pass
 
-                except Exception, e:
-                    print type(e)
+                except Exception as e:
+                    print(type(e))
 
                 udata = raw_input("? ")
 
@@ -593,7 +604,7 @@ def _menuShareConnectServer(self):
 
 def setupVW(vw):
     if vw is None:
-        print "vw is None, not setting up environment.  run setupVW(vw) with a valid vw"
+        print("vw is None, not setting up environment.  run setupVW(vw) with a valid vw")
         return
 
     try:
@@ -603,46 +614,67 @@ def setupVW(vw):
         while count:
             if vw.getMeta('Architecture') is not None:
                 break
-            print "waiting...."
+            print("waiting....")
             count -= 1
             time.sleep(.1)
         gbls['emu'] = vw.getEmulator()
-    except Exception, e:
-        if vw is not None:print "\n\t" + '\n\t'.join(["%s: \t%s" % (k,v) for k,v in vw.metadata.items()])
-        print "FAILED to get Emulator: %s" % e
+    except Exception as e:
+        if vw is not None:print("\n\t" + '\n\t'.join(["%s: \t%s" % (k,v) for k,v in vw.metadata.items()]))
+        print("FAILED to get Emulator: %s" % e)
 
     try:
         sctx = gbls['sctx'] = vs_anal.getSymbolikAnalysisContext(vw)
         gbls['xlate'] = sctx.getTranslator()
         gbls['symemu'] = vs_emu.SymbolikEmulator(vw)
-    except Exception, e:
+    except Exception as e:
         pass
 
-def interact():
-    e = None
-    ipsh = None
-    shell = None
-    __orig_globals = dict()
-    __orig_globals.update(globals())
+STYPE_NONE = 0
+STYPE_IPYTHON = 1
+STYPE_CODE_INTERACT = 2
 
-
+def interact(lcls, gbls, intro=""):
+    shelltype = STYPE_NONE
     try:
         import IPython.Shell
-        ipsh = IPython.Shell.IPShell(argv=[], user_ns=lcls, user_global_ns=gbls)
+        ipsh = IPython.Shell.IPShell(argv=[''], user_ns=lcls, user_global_ns=gbls)
         print(intro)
-        ipsh.mainloop()
-    except ImportError, e:
-        try:
-            from IPython.terminal.ipapp import load_default_config
-            from IPython.terminal.interactiveshell import TerminalInteractiveShell
-            ipsh = TerminalInteractiveShell(config=load_default_config(), user_ns=lcls)
-            ipsh.show_banner(intro)
-            ipsh.mainloop()
-        except ImportError, e:
-            print e
-            shell = code.InteractiveConsole(lcls)
-            shell.interact(intro)
+        shelltype = STYPE_IPYTHON
 
+    except ImportError as e:
+        try:
+            from IPython.terminal.interactiveshell import TerminalInteractiveShell
+            ipsh = TerminalInteractiveShell()
+            ipsh.user_global_ns.update(gbls)
+            ipsh.user_global_ns.update(lcls)
+            ipsh.autocall = 2       # don't require parenthesis around *everything*.  be smart!
+            shelltype = STYPE_IPYTHON
+            print(intro)
+
+        except ImportError as e:
+            try:
+                from IPython.frontend.terminal.interactiveshell import TerminalInteractiveShell
+                ipsh = TerminalInteractiveShell()
+                ipsh.user_global_ns.update(gbls)
+                ipsh.user_global_ns.update(lcls)
+                ipsh.autocall = 2       # don't require parenthesis around *everything*.  be smart!
+                shelltype = STYPE_IPYTHON
+
+                print(intro)
+            except ImportError as e:
+                print(e)
+                shell = code.InteractiveConsole(gbls)
+                shelltype = STYPE_IPYTHON
+                print(intro)
+
+    if shelltype == STYPE_IPYTHON:
+        ipsh.mainloop()
+
+    elif shelltype == STYPE_CODE_INTERACT:
+        shell.interact()
+
+    else:
+        print("SORRY, NO INTERACTIVE OPTIONS AVAILABLE!!  wtfo?")
 
 
 if __name__ == "__main__":
@@ -668,7 +700,7 @@ if __name__ == "__main__":
             vqt_main.startup(css=vqt_colors.qt_matrix)
 
     except Exception as e:
-        print "error: %r" % e
+        print("error: %r" % e)
 
     vw = None
     vws = []
@@ -717,4 +749,5 @@ if __name__ == "__main__":
     gbls['vprint'] = vprint
 
     setupVW(vw)
-    interact()
+    interact(lcls, gbls, intro)
+
