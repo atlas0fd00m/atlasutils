@@ -211,10 +211,12 @@ class TestEmulator:
                         if addr not in addrs:
                             addrs.append(addr)
                     # address
-                    addr = oper.getOperAddr(op, emu)
-                    if addr is not None:
-                        if addr not in addrs:
-                            addrs.append(addr)
+                    if oper.isDeref():
+                        addr = oper.getOperAddr(op, emu)
+                        if addr is not None:
+                            if addr not in addrs:
+                                addrs.append(addr)
+
                 except Exception as e:
                     print("error: %s" % e)
 
@@ -455,6 +457,7 @@ class TestEmulator:
                         self.printMemStatus(op)
                     except Exception as e:
                         print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
+                        sys.excepthook(*sys.exc_info())
 
                     print("Step: %s" % i)
                     mcanv.clearCanvas()
@@ -668,6 +671,8 @@ class TestEmulator:
                             self.printMemStatus(op, use_cached=True)
                         except Exception as e:
                             print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
+                            import sys
+                            sys.excepthook(*sys.exc_info())
 
                 # unless we've asked to skip the instruction...
                 elif skipop:
@@ -711,14 +716,16 @@ class TestEmulator:
                     if opnm is not None:
                         extra += '\t; $%d = %r' % (operidx, opnm)
 
-                dopval = oper.getOperAddr(op, emu)
-                if type(dopval) == int:
-                    dopnm = emu.vw.getName(dopval)
-                    if opnm is None and hasattr(emu, 'getVivTaint'):
-                        opnm = emu.getVivTaint(opval)
+                if oper.isDeref():
+                    dopval = oper.getOperAddr(op, emu)
+                    if type(dopval) == int:
+                        dopnm = emu.vw.getName(dopval)
+                        if opnm is None and hasattr(emu, 'getVivTaint'):
+                            opnm = emu.getVivTaint(opval)
 
-                    if dopnm is not None:
-                        extra += '\t; &$%d = %r' % (operidx, dopnm)
+                        if dopnm is not None:
+                            extra += '\t; &$%d = %r' % (operidx, dopnm)
+
         except Exception as e:
             print("getNameRefs: ERROR: %r" % e)
         #finally:
