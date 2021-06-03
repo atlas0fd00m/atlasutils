@@ -107,75 +107,178 @@ def compare(data1, data2):
 
 #######  replacement functions.  can set these in TestEmulator().call_handlers 
 #######  to execute these in python instead of the supporting library
-#### WOW these are fux0rd.  ARM specific.  FIXME: use calling convention stuff.
+#######  can also be run from runStep() ui to execute the replacement function
+def getLibcCallConv(emu):
+    if hasattr(emu, 'vw') and emu.vw is not None:
+        ccname = emu.vw.getMeta('DefaultCall')
+        cconv = emu.getCallingConvention(ccname)
+        return ccname, cconv
+
+    return emu.getCallingConventions()[0]
+
 def memset(emu, op=None):
-    data = ('%c' % emu.getRegisterByName('r1')) * emu.getRegisterByName('r2')
-    emu.writeMemory(emu.getRegisterByName('r0'), data)
+    ccname, cconv = getLibcCallConv(emu)
+    dest, char, count = cconv.getCallArgs(emu, 3)
+
+    data = ('%c' % char) * count
+    emu.writeMemory(dest, data)
     print(data)
     return data
 
 def memcpy(emu, op=None):
-    data = emu.readMemory(emu.getRegisterByName('r1'), emu.getRegisterByName('r2'))
-    emu.writeMemory(emu.getRegisterByName('r0'), data)
+    ccname, cconv = getLibcCallConv(emu)
+    dest, src, length = cconv.getCallArgs(emu, 3)
+    data = emu.readMemory(src, length)
+    emu.writeMemory(dest, data)
     print(data)
     return data
 
 def strncpy(emu, op=None):
-    data = emu.readMemory(emu.getRegisterByName('r1'), emu.getRegisterByName('r2'))
+    ccname, cconv = getLibcCallConv(emu)
+    dest, src, length = cconv.getCallArgs(emu, 3)
+    data = emu.readMemory(src, length)
     nulloc = data.find('\0')
     if nulloc != -1:
         data = data[:nulloc]
-    emu.writeMemory(emu.getRegisterByName('r0'), data)
+    emu.writeMemory(dest, data)
     print(data)
     return data
 
 def strcpy(emu, op=None):
-    data = readString(emu, emu.getRegisterByName('r1')) + '\0'
-    emu.writeMemory(emu.getRegisterByName('r0'), data)
+    ccname, cconv = getLibcCallConv(emu)
+    dest, src = cconv.getCallArgs(emu, 2)
+    data = readString(emu, src) + '\0'
+    emu.writeMemory(dest, data)
     print(data)
     return data
 
 def strcat(emu, op=None):
-    start = emu.getRegisterByName('r0')
+    ccname, cconv = getLibcCallConv(emu)
+    start, second = cconv.getCallArgs(emu, 2)
     initial = readString(emu, start)
-    data = readString(emu, emu.getRegisterByName('r1'))
+    data = readString(emu, second)
     emu.writeMemory(start + len(initial), data)
     print(initial+data)
     return initial+data
 
 def strlen(emu, op=None):
-    data = readString(emu, emu.getRegisterByName('r0'))
-    emu.setRegisterByName('r0', len(data))
+    ccname, cconv = getLibcCallConv(emu)
+    start = cconv.getCallArgs(emu, 1)
+    data = readString(emu, start)
+    cconv.setReturnValue(emu, len(data))
     print(len(data))
     return len(data)
 
-allocated_ptr = 0x10000000
+PAGE_SIZE = 1 << 12
+PAGE_NMASK = PAGE_SIZE - 1
+PAGE_MASK = ~PAGE_NMASK
+CHUNK_SIZE = 1 << 4
+CHUNK_NMASK = CHUNK_SIZE - 1
+CHUNK_MASK = ~CHUNK_NMASK
+
+class EmuHeap:
+    def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
+        self.emu = emu
+        self.size = size
+
+        mmap = '\0' * size
+
+        heapbase = self.findNewHeapBase(size, startingpoint)
+        self.ptr = heapbase
+
+    def findNewHeapBase(self, size, startingpoint=0x20000000):
+        heapbase = None
+        while not heapbase:
+            # if we roll into illegal memory, start over at page 2.  skip 0.
+            if startinpoint > (1<<(8*emu.psize)):
+                startingpoint = 0x1000
+
+            good = True
+            for x in range(size):
+                mmap = self.emu.getMemoryMap(startingpoint + x)
+                if mmap is None:
+                    continue
+
+                # we ran into a memory map.  adjust.
+                good=False
+                startingpoint = mmap[0] + mmap[1]
+                startingpoint += PAGE_NMASK
+                startingpoint &= PAGE_MASK
+                break
+
+            if good:
+                heapbase = startingpoint
+
+    def malloc(self, size):
+        size += CHUNK_NMASK
+        size &= CHUNK_MASK
+        chunk = self.ptr
+        self.ptr += size
+
+        return chunk
+
+    def free(self, addr):
+        # really?  nah.  not at this point.
+        pass
+
+
+def getHeap(emu, initial_size=None):
+    '''
+    Returns a Heap Object.
+    If one is not currently created in the emu (stored in emu metadata)
+    one is created.  If initial_size is not None, that value is used,
+    otherwise the default is used.
+    '''
+    heap = emu.getMeta('Heap')
+    if heap is None:
+        if initial_size is not None:
+            heap = EmuHeap(emu, initial_size)
+        else:
+            heap = EmuHeap(emu)
+        emu.setMeta('Heap', heap)
+
+    return heap
+
 def malloc(emu, op=None):
-    global allocated_ptr
-    emu.setRegisterByName('r0', allocated_ptr)
-    allocated_ptr += 0x1000
-    
+    ccname, cconv = getLibcCallConv(emu)
+    size = cconv.getCallArgs(emu, 1)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size)
+
+    cconv.setReturnValue(emu, allocated_ptr)
+
+def free(emu):
+    ccname, cconv = getLibcCallConv(emu)
+    va = cconv.getCallArgs(emu, 1)
+    print("FREE: 0x%x" % va)
+
 def skip(emu, op):
     emu.setProgramCounter(emu.getProgramCounter()+len(op))
 
 def ret0(emu, op):
-    emu.setRegisterByName('r0', 0)
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, 0)
 
 def ret1(emu, op):
-    emu.setRegisterByName('r0', 1)
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, 1)
 
 def retneg1(emu, op):
-    emu.setRegisterByName('r0', -1)
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, -1)
 
 
 def syslog(emu, op=None):
-    loglvl = emu.getRegisterByName('r0')
-    string = readString(emu, emu.getRegisterByName('r1'))
+    ccname, cconv = getLibcCallConv(emu)
+
+    loglvl, strlength = cconv.getCallArgs(emu, 2)
+    string = readString(emu, strlength)
     count = string.count('%')
     neg2 = string.count('%%')
     count -= (2*neg2)
 
-    args = tuple([emu.getRegister(x) for x in range(2, 2+count)])
+    args = cconv.getCallArgs(emu, count+2)[2:]
     outstring = string % args
     print("SYSLOG(%d): %s" % (loglvl, outstring))
     for s in args:
@@ -229,13 +332,13 @@ class TestEmulator:
                 #        print("No valid memory at address: %s" % addr)
                 continue
 
-            print(self.XW(emu, addr, snapshot=SNAP_SWAP))
+            print(self.XW(addr, snapshot=SNAP_SWAP))
         self.cached_mem_locs = addrs
 
 
-    def XW(self, tracer, address, length = 32, dwperline = 8, snapshot=0):
+    def XW(self, address, length = 32, dwperline = 8, snapshot=0):
         output = []
-        mm = tracer.getMemoryMap(address)
+        mm = self.emu.getMemoryMap(address)
         if mm is None:
             return ''
 
@@ -243,11 +346,11 @@ class TestEmulator:
         if mmva+mmsz < address + (length*4):
             goodbcnt = (mmva+mmsz-address)
             diff = (length*4) - goodbcnt
-            bs = tracer.readMemory(address, goodbcnt)
+            bs = self.emu.readMemory(address, goodbcnt)
             bs += b'A' * diff
 
         else:
-            bs = tracer.readMemory(address, length*4)
+            bs = self.emu.readMemory(address, length*4)
 
         for i in range(length):
             addr = address + (i * 4)
@@ -322,7 +425,10 @@ class TestEmulator:
         Show the contents of the Status Register
         """
         #print("\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister())))
-        print("\tStatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in self.emu.getStatusFlags().items()]))
+        try:
+            print("\tStatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in self.emu.getStatusFlags().items()]))
+        except Exception as e:
+            print("no flags: ", e)
 
 
     def stackDump(self):
@@ -418,6 +524,7 @@ class TestEmulator:
 
                 pc = emu.getProgramCounter()
                 if pc in (runTil, finish):
+                    print("PC reached 0x%x." % pc)
                     break
 
                 op = emu.parseOpcode(pc)
@@ -457,7 +564,8 @@ class TestEmulator:
                         self.printMemStatus(op)
                     except Exception as e:
                         print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
-                        sys.excepthook(*sys.exc_info())
+                        import traceback
+                        traceback.print_exc()
 
                     print("Step: %s" % i)
                     mcanv.clearCanvas()
@@ -615,6 +723,7 @@ class TestEmulator:
                                         else:
                                             print(out)
                                     except:
+                                        import sys
                                         sys.excepthook(*sys.exc_info())
 
                             except:
@@ -624,6 +733,7 @@ class TestEmulator:
                             uinp = input(prompt)
 
                 if quit:
+                    print("Quitting!")
                     self.printStats(i)
                     return
 
@@ -684,10 +794,12 @@ class TestEmulator:
                 break
 
             except envi.SegmentationViolation:
+                import sys
                 sys.excepthook(*sys.exc_info())
                 break
 
             except:
+                import sys
                 sys.excepthook(*sys.exc_info())
 
         self.printStats(i)
