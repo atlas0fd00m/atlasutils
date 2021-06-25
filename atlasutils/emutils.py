@@ -744,11 +744,19 @@ class TestEmulator:
                     continue
 
                 # handle Calls separately
-                if len(op.opers) and op.iflags & (envi.IF_CALL) and not skipop:
+                if op.isCall() and not skipop:
                     self.dbgprint("Call...")
-                    tva = op.getOperValue(0, emu)
-                    handler = self.call_handlers.get(tva)
-                    self.dbgprint( " handler for call to (0x%x): %r" % (tva, handler))
+                    handler = None
+                    for brva, brflags in op.getBranches(emu=emu):
+                        if brflags & envi.BR_FALL:
+                            continue
+
+                        self.dbgprint("brva: 0x%x  brflags: 0x%x" % (brva, brflags))
+                        handler = self.call_handlers.get(brva)
+                        if handler is not None:
+                            break
+
+                    self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
                     if handler is not None:
                         handler(emu, op)
                         skipop = True
