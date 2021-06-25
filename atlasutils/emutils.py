@@ -190,7 +190,7 @@ class EmuHeap:
         heapbase = None
         while not heapbase:
             # if we roll into illegal memory, start over at page 2.  skip 0.
-            if startinpoint > (1<<(8*emu.psize)):
+            if startingpoint > (1<<(8*self.emu.psize)):
                 startingpoint = 0x1000
 
             good = True
@@ -208,6 +208,8 @@ class EmuHeap:
 
             if good:
                 heapbase = startingpoint
+    
+        return heapbase
 
     def malloc(self, size):
         size += CHUNK_NMASK
@@ -241,7 +243,7 @@ def getHeap(emu, initial_size=None):
 
 def malloc(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    size = cconv.getCallArgs(emu, 1)
+    size, = cconv.getCallArgs(emu, 1)
 
     heap = getHeap(emu)
     allocated_ptr = heap.malloc(size)
@@ -727,6 +729,7 @@ class TestEmulator:
                                         sys.excepthook(*sys.exc_info())
 
                             except:
+                                import traceback
                                 traceback.print_exc()
 
                             #self.printStats(i)
