@@ -537,17 +537,22 @@ class TestEmulator:
                     emuBranch = False
 
                 #### TRACING 
-                tdata = tracedict.get(pc)
-                if tdata is not None:
-                    try:
-                        lcls = locals()
-                        outlcls = tracedict.get('locals')
-                        if outlcls is not None:
-                            lcls.update(outlcls)
+                for key in (pc, 'ALL'):
+                    tdata = tracedict.get(key)
+                    if tdata is not None:
+                        try:
+                            lcls = locals()
+                            outlcls = tracedict.get('locals')
+                            if outlcls is not None:
+                                lcls.update(outlcls)
 
-                        print(repr(eval(tdata, globals(), lcls)))
-                    except Exception as e:
-                        print("TraceMonitor ERROR at 0x%x: %r" % (pc, e))
+                            lcls.update(emu.getRegisters())
+                            if isinstance(emu, vtrace.Trace):
+                                lcls.update(emu.getRegisterContext().getRegisters())
+
+                            print(repr(eval(tdata, globals(), lcls)))
+                        except Exception as e:
+                            print("TraceMonitor ERROR at 0x%x: %r" % (pc, e))
 
                 ####
 
