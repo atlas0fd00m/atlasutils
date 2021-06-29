@@ -11,6 +11,9 @@ import envi.memory as e_m
 import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
 
+import envi.archs.i386 as e_i386
+import envi.archs.amd64 as e_amd64
+
 import visgraph.pathcore as vg_path
 from binascii import hexlify, unhexlify
 
@@ -20,11 +23,15 @@ SNAP_CAP = 1
 SNAP_DIFF = 2
 SNAP_SWAP = 3
 
+PEBSZ = 4096
+TEBSZ = 4096
+
 def parseExpression(emu, expr, lcls={}):
     '''
     localized updated expression parser for the emulator at any state
     '''
-    lcls.update(emu.vw.getExpressionLocals())
+    if hasattr(emu, 'vw'):
+        lcls.update(emu.vw.getExpressionLocals())
     lcls.update(emu.getRegisters())
     return e_expr.evaluate(expr, lcls)
 
@@ -47,11 +54,11 @@ class TraceMonitor(v_i_monitor.AnalysisMonitor):
 
 testemu = None
 call_handlers = {}
-def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, verbose=False):
+def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, verbose=False, guiFuncGraphName=None):
     global testemu
 
     if testemu is None or testemu.emu != emu:
-        testemu = TestEmulator(emu, verbose=verbose)
+        testemu = TestEmulator(emu, verbose=verbose, guiFuncGraphName=guiFuncGraphName)
         testemu.call_handlers.update(call_handlers)
     
     testemu.runStep(maxstep=maxstep, follow=follow, showafter=showafter, runTil=runTil, pause=pause, silent=silent, finish=finish, tracedict=tracedict)
@@ -60,14 +67,14 @@ def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, paus
 def readString(emu, va, CHUNK=50):
     off = 0
     out = [ emu.readMemory(va + off, CHUNK) ]
-    while '\0' not in out[-1]:
+    while b'\0' not in out[-1]:
         off += CHUNK
         data = emu.readMemory(va + off, CHUNK)
         out.append(data)
 
-    data = ''.join(out)
+    data = b''.join(out)
 
-    return data[:data.find('\0')]
+    return data[:data.find(b'\0')]
 
 prehilite = '\x1b[7m'
 posthilite = '\x1b[27m'
@@ -118,56 +125,115 @@ def getLibcCallConv(emu):
 
 def memset(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, char, count = cconv.getCallArgs(emu, 3)
 
     data = ('%c' % char) * count
     emu.writeMemory(dest, data)
     print(data)
+    cconv.deallocateCallSpace(emu, 0, 0)
     return data
 
 def memcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src, length = cconv.getCallArgs(emu, 3)
     data = emu.readMemory(src, length)
     emu.writeMemory(dest, data)
     print(data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
+
     return data
 
 def strncpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src, length = cconv.getCallArgs(emu, 3)
     data = emu.readMemory(src, length)
-    nulloc = data.find('\0')
+    nulloc = data.find(b'\0')
     if nulloc != -1:
         data = data[:nulloc]
     emu.writeMemory(dest, data)
     print(data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
     return data
 
 def strcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src = cconv.getCallArgs(emu, 2)
-    data = readString(emu, src) + '\0'
+    data = readString(emu, src) + b'\0'
     emu.writeMemory(dest, data)
     print(data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
     return data
 
 def strcat(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     start, second = cconv.getCallArgs(emu, 2)
     initial = readString(emu, start)
     data = readString(emu, second)
+    emu.writeMemory(start + len(initial) + b'\0', data)
+    print(initial+data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
+    return initial+data
+
+def strncat(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    start, second, max2 = cconv.getCallArgs(emu, 3)
+    initial = readString(emu, start)
+    data = readString(emu, second)[:max2]
+    
     emu.writeMemory(start + len(initial), data)
     print(initial+data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
     return initial+data
 
 def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     start = cconv.getCallArgs(emu, 1)
     data = readString(emu, start)
-    cconv.setReturnValue(emu, len(data))
     print(len(data))
+    cconv.setReturnValue(emu, len(data))
+    cconv.deallocateCallSpace(emu, 0)
     return len(data)
+
+def strcmp(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    start1, start2 = cconv.getCallArgs(emu, 2)
+    data1 = readString(emu, start1)
+    data2 = readString(emu, start2)
+    data1len = len(data1)
+    data2len = len(data2)
+    failed = False
+
+    if data1len != data2len:
+        failed = True
+        data1 += '\0'
+        data2 += '\0'
+
+    for idx in min(data1len, data2len):
+        if data1[idx] != data2[idx]:
+            failed = True
+            break
+    
+    retval = data2[idx] - data1[idx]
+    if failed:
+        print("strcmp failed: %d" % retval)
+
+    cconv.setReturnValue(emu, retval)
+    cconv.deallocateCallSpace(emu, 0)
+    return retval
+
 
 PAGE_SIZE = 1 << 12
 PAGE_NMASK = PAGE_SIZE - 1
@@ -175,6 +241,32 @@ PAGE_MASK = ~PAGE_NMASK
 CHUNK_SIZE = 1 << 4
 CHUNK_NMASK = CHUNK_SIZE - 1
 CHUNK_MASK = ~CHUNK_NMASK
+
+def findNewMemoryMapSpace(emu, size, startingpoint=0x20000000):
+    baseva = None
+    while not baseva:
+        # if we roll into illegal memory, start over at page 2.  skip 0.
+        if startingpoint > (1<<(8*emu.psize)):
+            startingpoint = 0x1000
+
+        good = True
+        for x in range(size):
+            mmap = emu.getMemoryMap(startingpoint + x)
+            if mmap is None:
+                continue
+
+            # we ran into a memory map.  adjust.
+            good=False
+            startingpoint = mmap[0] + mmap[1]
+            startingpoint += PAGE_NMASK
+            startingpoint &= PAGE_MASK
+            break
+
+        if good:
+            baseva = startingpoint
+
+    return baseva
+
 
 class EmuHeap:
     def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
@@ -184,7 +276,10 @@ class EmuHeap:
         mmap = '\0' * size
 
         heapbase = self.findNewHeapBase(size, startingpoint)
+        if not emu.getMemoryMap(heapbase):
+            emu.addMemoryMap(heapbase, 6, 'heap_%x'%heapbase, b'\0'*size)
         self.ptr = heapbase
+        self.tracker = {}
 
     def findNewHeapBase(self, size, startingpoint=0x20000000):
         heapbase = None
@@ -217,7 +312,18 @@ class EmuHeap:
         chunk = self.ptr
         self.ptr += size
 
+        self.tracker[chunk] = size
         return chunk
+
+    def realloc(self, chunk, size):
+        if chunk not in self.tracker:
+            return 0
+
+        newchunk = self.malloc(size)
+        oldsize = self.tracker.get(chunk)
+        self.emu.writeMemory(newchunk, self.emu.readMemory(chunk, oldsize))
+
+        return newchunk
 
     def free(self, addr):
         # really?  nah.  not at this point.
@@ -241,19 +347,75 @@ def getHeap(emu, initial_size=None):
 
     return heap
 
+def HeapAlloc(emu, op=None):
+    '''
+    This is a functional heap implementation, not intended to behave in any way like 
+    the MS heap or any other heap impls available.  It gives you a chunk of memory so
+    the program you're playing with keeps going.
+    That's it.
+    dwflags is ignored completely.
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    hheap, dwflags, size = cconv.getCallArgs(emu, 3)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size)
+    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
+
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
+
+def HeapFree(emu):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    hheap, dwflags, va = cconv.getCallArgs(emu, 3)
+    print("FREE: 0x%x" % va)
+    cconv.setReturnValue(emu, va)
+    cconv.deallocateCallSpace(emu, 0)
+
 def malloc(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     size, = cconv.getCallArgs(emu, 1)
 
     heap = getHeap(emu)
     allocated_ptr = heap.malloc(size)
+    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
 
+    #cconv.setReturnValue(emu, allocated_ptr)
     cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
 
 def free(emu):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
     va = cconv.getCallArgs(emu, 1)
     print("FREE: 0x%x" % va)
+    cconv.setReturnValue(emu, 0)
+    cconv.deallocateCallSpace(emu, 0)
+
+def realloc(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    existptr, size, = cconv.getCallArgs(emu, 2)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.realloc(existptr, size)
+
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
+
+def HeapReAlloc(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    hheap, dwflags, existptr, size, = cconv.getCallArgs(emu, 4)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.realloc(existptr, size)
+
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
 
 def skip(emu, op):
     emu.setProgramCounter(emu.getProgramCounter()+len(op))
@@ -273,6 +435,7 @@ def retneg1(emu, op):
 
 def syslog(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
 
     loglvl, strlength = cconv.getCallArgs(emu, 2)
     string = readString(emu, strlength)
@@ -286,15 +449,82 @@ def syslog(emu, op=None):
     for s in args:
         if emu.isValidPointer(s):
             print("\t" + readString(emu, s))
+    cconv.setReturnValue(emu, 0)
+    cconv.deallocateCallSpace(emu, 0)
 
+def nop(emu, op=None):
+    pass
+
+import_map = {
+        '*.syslog': syslog,
+        '*.malloc': malloc,
+        '*.free': free,
+        '*.realloc': realloc,
+        '*.strlen': strlen,
+        '*.strcmp': strcmp,
+        '*.strcat': strcat,
+        '*.strcpy': strcpy,
+        '*.strncpy': strncpy,
+        '*.memcpy': memcpy,
+        '*.memset': memset,
+        'kernel32.HeapAlloc': HeapAlloc,
+        'kernel32.HeapFree': HeapFree,
+        'kernel32.HeapReAlloc': HeapReAlloc,
+        'kernel32.HeapDestroy': nop,
+        'kernel32.HeapCreate': nop,     # malloc takes care of this
+        }
 
 class TestEmulator:
-    def __init__(self, emu, verbose=False):
+    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None):
+        self.vw = None
+        self.vwg = None
+
+        self.emu = emu
+
+        if vw is not None:
+            self.vw = vw
+            self.vwg = self.vw.getVivGui()
+        elif hasattr(emu, 'vw'):
+            self.vw = emu.vw
+            self.vwg = self.vw.getVivGui()
+
+        self.verbose = verbose
+        self.guiFuncGraphName = guiFuncGraphName
+
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
-        self.verbose = verbose
-        self.emu = emu
+        self.hookImports()
+
+        self.teb = None
+        self.peb = None
+        if fakePEB:
+            self.initFakePEB()
+
+    def initFakePEB(self):
+        peb = findNewMemoryMapSpace(self.emu, PEBSZ, 0x7ffd3000)
+        self.emu.addMemoryMap(peb, 6, 'FakePEB', b'\0'*PEBSZ)
+        teb = findNewMemoryMapSpace(self.emu, TEBSZ, 0x7ffdc000)
+        self.emu.addMemoryMap(teb, 6, 'FakeTEB', b'\0'*TEBSZ)
+
+        self.emu.writeMemoryPtr(teb+0x30, peb)
+        # fake TEB: c4eea6060000a70600e0a60600000000001e0000000000000040fd7f00000000401700000c140000000000002c40fd7f00c0fd7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+        # fake PEB: 00000108ffffffff0000e7008088d277b817400000000000000040008083d27700000000000000000100000038d5dc7700000000000000000000eb77000000006082d277ffffffff0700000000006f7f0000000090056f7f0000fb7f2402fc7f4806fd7f01000000000000000000000000809b076de8ffff000010000020000000000100001000000c000000100000000085d27700005d0000000000140000004083d2770600000001000000b11d00010200000003000000060000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+        if self.emu.psize == 4:
+            self.emu.setSegmentInfo(e_i386.SEG_FS, teb, TEBSZ)
+        else:
+            self.emu.setSegmentInfo(e_amd64.SEG_GS, teb, TEBSZ)
+
+
+    def hookImports(self):
+        if not hasattr(self.emu, 'vw') or self.emu.vw is None:
+            return
+
+        for impva, impsz, imptype, impname in self.emu.vw.getImports():
+            if impname in import_map:
+                self.call_handlers[impva] = import_map.get(impname)
 
     def printMemStatus(self, op=None, use_cached=False):
         emu = self.emu
@@ -372,7 +602,7 @@ class TestEmulator:
 
             if snapshot in (SNAP_CAP, SNAP_SWAP):
                 self.XWsnapshot[addr] = data
-            output.append(pre + bs[i*4:(i*4)+4].hex() + post)
+            output.append(pre + data.hex() + post)
 
             if ((i+1) % dwperline == 0):
                 output.append("\n")
@@ -600,8 +830,17 @@ class TestEmulator:
 
                     if not (emuBranch or nonstop) and pause:
                         tova = None
+                        nextva = op.va + len(op)
                         moveon = False
 
+                        # send the selected GUI window to current program counter
+                        if self.guiFuncGraphName is not None and not silent:
+                            if self.vwg is not None:
+                                self.vwg.sendFuncGraphTo(pc)
+                            else:
+                                print("can't send FuncGraph to 0x%x because we don't have a handle to the Viv GUI" % pc)
+
+                        # UI Interface!  interact with the user
                         uinp = input(prompt)
                         while len(uinp) and not (moveon or quit or emuBranch):
                             try:
@@ -611,16 +850,17 @@ class TestEmulator:
 
                                 elif uinp.startswith('silent'):
                                     parts = uinp.split(' ')
-                                    silentUntil = parseExpression(emu, parts[-1])
+                                    silentUntil = parseExpression(emu, parts[-1], {'next':nextva})
+                                    print("silent until 0x%x" % silentUntil)
                                     silent = True
 
                                 elif uinp.startswith('go '):
                                     args = uinp.split(' ')
 
                                     if args[-1].startswith('+'):
-                                        nonstop = parseExpression(emu, args[-1])
+                                        nonstop = parseExpression(emu, args[-1], {'next': nextva})
                                     else:
-                                        tova = parseExpression(emu, args[-1])
+                                        tova = parseExpression(emu, args[-1], {'next': nextva})
                                         nonstop = 1
                                     break
 
@@ -720,11 +960,21 @@ class TestEmulator:
                                 elif uinp == 'strlen':
                                     print(strlen(emu))
                                     skipop = True
+
+                                elif uinp == 'malloc':
+                                    print(malloc(emu))
+                                    skipop = True
                                 else:
                                     try:
-                                        lcls = locals()
+                                        lcls = {'next': nextva}
+                                        lcls.update(locals())
                                         lcls.update(emu.getRegisters())
                                         out = eval(uinp, globals(), lcls)
+
+                                        taint = emu.getVivTaint(out)
+                                        if taint:
+                                            out = "taint: %s: %s" % (taint[1], emu.reprVivTaint(taint))
+                                        
                                         if type(out) == int:
                                             print(hex(out))
                                         else:
@@ -839,7 +1089,10 @@ class TestEmulator:
                 if type(opval) == int:
                     opnm = emu.vw.getName(opval)
                     if opnm is None and hasattr(emu, 'getVivTaint'):
-                        opnm = emu.getVivTaint(opval)
+                        taint = emu.getVivTaint(opval)
+                        if taint:
+                            taintrepr = emu.reprVivTaint(taint)
+                            opnm = "%s (%s)" % (taint[1], taintrepr)
 
                     if opnm is not None:
                         extra += '\t; $%d = %r' % (operidx, opnm)
@@ -849,7 +1102,10 @@ class TestEmulator:
                     if type(dopval) == int:
                         dopnm = emu.vw.getName(dopval)
                         if opnm is None and hasattr(emu, 'getVivTaint'):
-                            opnm = emu.getVivTaint(opval)
+                            taint = emu.getVivTaint(opval)
+                            if taint:
+                                taintrepr = emu.reprVivTaint(taint)
+                                opnm = "%s (%s)" % (taint[1], taintrepr)
 
                         if dopnm is not None:
                             extra += '\t; &$%d = %r' % (operidx, dopnm)
@@ -871,8 +1127,37 @@ class TestEmulator:
             emu.stepi()
         runStep(emu)
 
-    def printWriteLog(emu):
-        print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.hex(),d) for x,y,d in emu.path[2].get('writelog')]))
+    def printWriteLog(self):
+        print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.hex(),d) for x,y,d in self.emu.path[2].get('writelog')]))
+
+
+    def insertReadWriteComments(self, vw):
+        for va, tva, data in self.emu.path[2].get('readlog'):
+            insertComment(vw, va, "[r:%x] %r (%r)" % (tva, data.hex(), data))
+
+        for va, tva, data in self.emu.path[2].get('writelog'):
+            insertComment(vw, va, "[W:%x] %r (%r)" % (tva, data.hex(), data))
+
+
+import vivisect.impemu.monitor as vi_mon
+import vivisect.symboliks.analysis as vs_anal
+
+class SymbolikTraceAnalMod(vi_mon.AnalysisMonitor):
+    def __init__(self, emu):
+        self.emu = emu
+        self.sctx = vs_anal.getSymbolikAnalysContext(emu.vw)
+        self.xlate = self.sctx.getTranslator()
+
+    def prehook(self, emu, op, starteip):
+        self.xlate.translateOp(op)
+
+def insertComment(vw, va, comment):
+    curcmt = vw.getComment(va)
+    if curcmt is not None:
+        vw.setComment(va, "%s  ; %s" % (comment, curcmt))
+    else:
+        vw.setComment(va, comment)
+
 
 
 if __name__ == "__main__":
