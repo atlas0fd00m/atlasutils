@@ -4,6 +4,7 @@ import sys
 import time
 import struct
 import struct
+import vtrace
 import traceback
 
 import envi
@@ -33,6 +34,8 @@ def parseExpression(emu, expr, lcls={}):
     if hasattr(emu, 'vw'):
         lcls.update(emu.vw.getExpressionLocals())
     lcls.update(emu.getRegisters())
+    if isinstance(emu, vtrace.Trace):
+        lcls.update(emu.getRegisterContext().getRegisters())
     return e_expr.evaluate(expr, lcls)
 
 import vivisect.impemu.monitor as v_i_monitor
@@ -621,6 +624,8 @@ class TestEmulator:
                 break
 
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
+        if isinstance(emu, vtrace.Trace):
+            reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterContext().getRegisterInfo()
         reg_dict = { reg_table[i][0] : (reg_table[i][1], reg_vals[i]) for i in range(len(reg_table)) }
 
         # print(through the various registers)
@@ -969,6 +974,9 @@ class TestEmulator:
                                         lcls = {'next': nextva}
                                         lcls.update(locals())
                                         lcls.update(emu.getRegisters())
+                                        if isinstance(emu, vtrace.Trace):
+                                            lcls.update(emu.getRegisterContext().getRegisters())
+
                                         out = eval(uinp, globals(), lcls)
 
                                         taint = emu.getVivTaint(out)
