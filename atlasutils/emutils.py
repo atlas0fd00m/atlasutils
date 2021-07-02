@@ -6,6 +6,7 @@ import struct
 import struct
 import vtrace
 import traceback
+import collections
 
 import envi
 import envi.memory as e_m
@@ -15,6 +16,7 @@ import envi.memcanvas as e_memcanvas
 import envi.archs.i386 as e_i386
 import envi.archs.amd64 as e_amd64
 
+import vivisect
 import visgraph.pathcore as vg_path
 from binascii import hexlify, unhexlify
 
@@ -118,6 +120,28 @@ def compare(data1, data2):
 #######  replacement functions.  can set these in TestEmulator().call_handlers 
 #######  to execute these in python instead of the supporting library
 #######  can also be run from runStep() ui to execute the replacement function
+def getMSCallConv(emu, tva=None, wintel32pref='stdcall'):
+    if hasattr(emu, 'vw') and emu.vw is not None:
+        ccname = None
+        tloc = emu.vw.getLocation(tva)
+        if tloc is not None:
+            tlva, tlsz, tltype, tltinfo = tloc
+            if tltype == vivisect.LOC_IMPORT:
+                impapi = emu.vw.getImpApi(tltinfo)
+                if impapi is not None:
+                    rettyp, _, ccname, realname, args = impapi
+
+        if ccname is None:
+            if emu.psize == 4: # and emu._arch ????:
+                ccname = wintel32pref
+            else:
+                ccname = emu.vw.getMeta('DefaultCall')
+
+        cconv = emu.getCallingConvention(ccname)
+        return ccname, cconv
+
+    return emu.getCallingConventions()[0]
+
 def getLibcCallConv(emu):
     if hasattr(emu, 'vw') and emu.vw is not None:
         ccname = emu.vw.getMeta('DefaultCall')
@@ -246,6 +270,7 @@ CHUNK_NMASK = CHUNK_SIZE - 1
 CHUNK_MASK = ~CHUNK_NMASK
 
 def findNewMemoryMapSpace(emu, size, startingpoint=0x20000000):
+    print("findNewMemoryMapSpace: deprecated.  switch to MemoryObject.allocateMemory/findFreeMemoryBlock()")
     baseva = None
     while not baseva:
         # if we roll into illegal memory, start over at page 2.  skip 0.
@@ -258,12 +283,13 @@ def findNewMemoryMapSpace(emu, size, startingpoint=0x20000000):
             if mmap is None:
                 continue
 
-            # we ran into a memory map.  adjust.
-            good=False
-            startingpoint = mmap[0] + mmap[1]
-            startingpoint += PAGE_NMASK
-            startingpoint &= PAGE_MASK
-            break
+            else:
+                # we ran into a memory map.  adjust.
+                good=False
+                startingpoint = mmap[0] + mmap[1]
+                startingpoint += PAGE_NMASK
+                startingpoint &= PAGE_MASK
+                break
 
         if good:
             baseva = startingpoint
@@ -285,6 +311,7 @@ class EmuHeap:
         self.tracker = {}
 
     def findNewHeapBase(self, size, startingpoint=0x20000000):
+        print("findNewHeapBase: deprecated.  switch to MemoryObject.allocateMemory/findFreeMemoryBlock()")
         heapbase = None
         while not heapbase:
             # if we roll into illegal memory, start over at page 2.  skip 0.
@@ -332,6 +359,14 @@ class EmuHeap:
         # really?  nah.  not at this point.
         pass
 
+    def dump(self):
+        out = []
+        for baseva, size in list(self.tracker.items()):
+            data = self.emu.readMemory(baseva, size)
+            out.append("[0x%x:0x%x]: %r" % (baseva, size, data.hex()))
+
+        return '\n'.join(out)
+
 
 def getHeap(emu, initial_size=None):
     '''
@@ -350,6 +385,26 @@ def getHeap(emu, initial_size=None):
 
     return heap
 
+
+#### Win32 helper functions
+def HeapCreate(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    opts, initsz, maxsz = cconv.getCallArgs(emu, 3)
+    print("HeapCreate: flOptions: 0x%x dwInitialSize: 0x%x, dwMaxSize" % (opts, initsz, maxsz))
+    # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
+    cconv.setReturnValue(emu, emu.setVivTaint('MSHeap', op.va))
+    cconv.deallocateCallSpace(emu, 3)
+
+def HeapDestroy(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    heapHandle = cconv.getCallArgs(emu, 1)
+    print("HeapDestroy: 0x%x" % heapHandle)
+    # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
+    cconv.setReturnValue(emu, heapHandle)
+    cconv.deallocateCallSpace(emu, 1)
+
 def HeapAlloc(emu, op=None):
     '''
     This is a functional heap implementation, not intended to behave in any way like 
@@ -358,7 +413,7 @@ def HeapAlloc(emu, op=None):
     That's it.
     dwflags is ignored completely.
     '''
-    ccname, cconv = getLibcCallConv(emu)
+    ccname, cconv = getMSCallConv(emu, op.va)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     hheap, dwflags, size = cconv.getCallArgs(emu, 3)
 
@@ -367,16 +422,176 @@ def HeapAlloc(emu, op=None):
     print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
 
     cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.deallocateCallSpace(emu, 3)   # ??  why am i *not* executingReturn?
 
-def HeapFree(emu):
-    ccname, cconv = getLibcCallConv(emu)
+def HeapFree(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     hheap, dwflags, va = cconv.getCallArgs(emu, 3)
     print("FREE: 0x%x" % va)
     cconv.setReturnValue(emu, va)
+    cconv.deallocateCallSpace(emu, 3)
+
+def HeapReAlloc(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    hheap, dwflags, existptr, size, = cconv.getCallArgs(emu, 4)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.realloc(existptr, size)
+
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 4)
+
+critical_sections = collections.defaultdict(list)
+def InitializeCriticalSection(emu, op=None):
+    global critical_sections
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    lpCriticalSection, = cconv.getCallArgs(emu, 1)
+    critical_sections[lpCriticalSection].append(op.va)
+    # do absolutely nothing
+
+    cconv.deallocateCallSpace(emu, 1)
+
+def EnterCriticalSection(emu, op=None):
+    global critical_sections
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    lpCriticalPointer, = cconv.getCallArgs(emu, 1)
+    critical_sections[lpCriticalPointer].append(op.va)
+    # do absolutely nothing
+
+    cconv.deallocateCallSpace(emu, 1)
+
+def LeaveCriticalSection(emu, op=None):
+    global critical_sections
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    lpCriticalPointer, = cconv.getCallArgs(emu, 1)
+    critical_sections[lpCriticalPointer].append(op.va)
+    # do absolutely nothing
+
+    cconv.deallocateCallSpace(emu, 1)
+
+last_error = 0
+def GetLastError(emu, op=None):
+    global last_error
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    cconv.setReturnValue(emu, last_error)
     cconv.deallocateCallSpace(emu, 0)
 
+def SetLastError(emu, op=None):
+    global last_error
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    last_error, = cconv.getCallArgs(emu, 1)
+    cconv.deallocateCallSpace(emu, 1)
+
+tls_data = collections.defaultdict(list)
+def TlsGetValue(emu, op=None):
+    global tls_data
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    slot, = cconv.getCallArgs(emu, 1)
+    if len(tls_data[slot]):
+        data = tls_data[slot][-1]
+
+    else:
+        data = emu.setVivTaint('TlsGetValue::Slot at 0x%x' % op.va, slot)
+        tls_data[slot].append(data)
+
+    cconv.setReturnValue(emu, data)
+    cconv.deallocateCallSpace(emu, 1)
+
+def TlsSetValue(emu, op=None):
+    global tls_data
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    slot, data = cconv.getCallArgs(emu, 2)
+    tls_data[slot].append(data)
+
+    cconv.setReturnValue(emu, slot)
+    cconv.deallocateCallSpace(emu, 2)
+
+def CompareStringEx(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    lpLocaleName, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2, lpVersionInfo, \
+            lpRsrvd, lParam = cconv.getCallArgs(emu, 9)
+    result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
+            lpString2, cchCount2, lpVersionInfo, lpRsrvd, lParam, charsize=2)
+
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 9)
+
+def CompareStringW(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2 = cconv.getCallArgs(emu, 6)
+    result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
+            lpString2, cchCount2, 0,0,0, charsize=2)
+
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 6)
+
+def CompareStringA(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2 = cconv.getCallArgs(emu, 6)
+    result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
+            lpString2, cchCount2, 0,0,0, charsize=2)
+
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 6)
+
+CSTR_FAILURE = 0
+CSTR_LESS_THAN = 1
+CSTR_EQUAL = 2
+CSTR_GREATER_THAN = 3
+
+def doWin32StringCompare(emu, op, \
+        Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2, \
+        lpVersionInfo, lpReserved, lParam, charsize=1):
+
+    if dwCmpFlags:
+        print("CompareStringEx with flags %x, unsupported." % dwCmpFlags)
+
+    idx = 0
+    result = 0
+    while True:
+        if (cchCount1 != -1 and idx > cchCount1):
+            if cchCount1 == cchCount2:
+                return CSTR_EQUAL
+            if cchCount2 == -1 and val2[0] == 0:
+                return CSTR_EQUAL
+            return CSTR_GREATER # ? if str1 is done and str2 isn't?
+
+        if (cchCount2 != -1 and idx > cchCount2):
+            if cchCount1 == cchCount2:
+                return CSTR_EQUAL
+            if cchCount1 == -1 and val1[0] == 0:
+                return CSTR_EQUAL
+            return CSTR_LESS_THAN   # ? if str2 is done and str1 isn't?
+
+        val1 = emu.readMemory(lpString1 + idx, charsize)
+        val2 = emu.readMemory(lpString2 + idx, charsize)
+        # do any conversions necessary (skipping for now, i'm feeling lucky)
+
+        # do comparison.  this version is cheating:
+        for x in range(charsize):
+            val1part = val1[x]
+            val2part = val2[x]
+            result = val1part - val2part
+            if result:
+                return result + 2   # MS likes 1,2,3 where 0 is failure
+
+        idx += charsize
+
+    return CSTR_FAILURE
+
+#### posix function helpers
 def malloc(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
@@ -402,17 +617,6 @@ def realloc(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     existptr, size, = cconv.getCallArgs(emu, 2)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.realloc(existptr, size)
-
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
-
-def HeapReAlloc(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    hheap, dwflags, existptr, size, = cconv.getCallArgs(emu, 4)
 
     heap = getHeap(emu)
     allocated_ptr = heap.realloc(existptr, size)
@@ -473,8 +677,17 @@ import_map = {
         'kernel32.HeapAlloc': HeapAlloc,
         'kernel32.HeapFree': HeapFree,
         'kernel32.HeapReAlloc': HeapReAlloc,
-        'kernel32.HeapDestroy': nop,
-        'kernel32.HeapCreate': nop,     # malloc takes care of this
+        'kernel32.HeapDestroy': HeapDestroy,
+        'kernel32.HeapCreate': HeapCreate,     # malloc takes care of this
+        'kernel32.InitializeCriticalSection': InitializeCriticalSection,
+        'kernel32.EnterCriticalSection': EnterCriticalSection,
+        'kernel32.LeaveCriticalSection': LeaveCriticalSection,
+        'kernel32.GetLastError': GetLastError,
+        'kernel32.SetLastError': SetLastError,
+        'kernel32.TlsGetValue': TlsGetValue,
+        'kernel32.TlsSetValue': TlsSetValue,
+        'kernel32.CompareStringW': CompareStringW,
+        'kernel32.CompareStringA': CompareStringA,
         }
 
 class TestEmulator:
@@ -676,6 +889,11 @@ class TestEmulator:
             print("\t0x%x:\t0x%x" % (sp, emu.readMemValue(sp, emu.psize)))
             sp += emu.psize
 
+    def heapDump(self):
+        emu = self.emu
+        print("Stack Dump:")
+        heap = getHeap(emu)
+        print(heap.dump())
 
     def printStats(self, i):
         curtime = time.time()
@@ -878,6 +1096,11 @@ class TestEmulator:
                                     moveon = True
                                     break
 
+                                elif uinp == 'heap':
+                                    self.heapDump()
+                                    moveon = True
+                                    break
+
                                 elif uinp == 'refresh':
                                     # basically does a NOP, doesn't change anything, just let the data be reprinted.
                                     moveon = True
@@ -903,7 +1126,7 @@ class TestEmulator:
                                         if len(tgt) > 1:
                                             size = parseExpression(emu, tgt[-1])
                                         else:
-                                            size = 4
+                                            size = emu.psize
 
                                         addrstr = tgt[0]
                                         memaddr = parseExpression(emu, addrstr)
@@ -936,8 +1159,13 @@ class TestEmulator:
                                                 print("unknown size: %r.  using default size." % size)
 
                                         va = parseExpression(emu, expr)
-                                        data = emu.readMemory(va, size)
-                                        print("[%s:%s] == %r" % (expr, size, data.hex()))
+                                        if size in ('s', 'S'):
+                                            data = emu.readMemString(va)
+                                            print("[%s] == %r" % (expr, size, data))
+
+                                        else:
+                                            data = emu.readMemory(va, size)
+                                            print("[%s:%s] == %r" % (expr, size, data.hex()))
                                     except Exception as e:
                                         print("ERROR: %r" % e)
 
