@@ -1059,7 +1059,7 @@ class TestEmulator:
                         # send the selected GUI window to current program counter
                         if self.guiFuncGraphName is not None and not silent:
                             if self.vwg is not None:
-                                self.vwg.sendFuncGraphTo(pc)
+                                self.vwg.sendFuncGraphTo(pc, self.guiFuncGraphName)
                             else:
                                 print("can't send FuncGraph to 0x%x because we don't have a handle to the Viv GUI" % pc)
 
@@ -1123,17 +1123,23 @@ class TestEmulator:
                                     if '[' in args[0]:
                                         # memory derefs
                                         tgt = args[0].replace('[','').replace(']','').split(':')
-                                        if len(tgt) > 1:
-                                            size = parseExpression(emu, tgt[-1])
-                                        else:
-                                            size = emu.psize
-
                                         addrstr = tgt[0]
                                         memaddr = parseExpression(emu, addrstr)
 
+                                        if len(tgt) > 1:
+                                            if tgt[-1] not in ('h', 'H', 's', 'S'):
+                                                size = parseExpression(emu, tgt[-1])
+                                        else:
+                                            size = emu.psize
+
+
                                         if data.startswith('"') and data.endswith('"'):
                                             # write string data
-                                            emu.writeMemory(memaddr, data[1:-1])
+                                            bdata = (data[1:-1]).encode()
+                                            emu.writeMemory(memaddr, bdata)
+                                        elif tgt[-1] in ('h', 'H'):
+                                            bdata = bytes.fromhex(data.encode())
+                                            emu.writeMemory(memaddr, bdata)
                                         else:
                                             # write number
                                             emu.writeMemValue(memaddr, parseExpression(emu, data), size)
@@ -1150,20 +1156,25 @@ class TestEmulator:
                                         print("handling memory read at [%s]" % expr)
                                         size = emu.getPointerSize()
                                         if ':' in expr:
-                                            nexpr, size = expr.rsplit(':',1)
-                                            try:
-                                                size = parseExpression(emu, size)
-                                                expr = nexpr
-                                            except Exception as e:
-                                                # if number fails, just continue with a default size and the original expr
-                                                print("unknown size: %r.  using default size." % size)
-
-                                        va = parseExpression(emu, expr)
-                                        if size in ('s', 'S'):
-                                            data = emu.readMemString(va)
-                                            print("[%s] == %r" % (expr, size, data))
+                                            nexpr, nsize = expr.rsplit(':',1)
+                                            va = parseExpression(emu, nexpr)
+                                            if nsize in ('s', 'S'):
+                                                data = emu.readMemString(va)
+                                                print("[%s] == %r" % (expr, data))
+                                            elif nsize in ('w', 'W'):
+                                                data = readMemString(emu, va, wide=True)
+                                                print("[%s] == %r" % (expr, data))
+                                            else:
+                                                try:
+                                                    size = parseExpression(emu, nsize)
+                                                    data = emu.readMemory(va, size)
+                                                    print("[%s:%s] == %r" % (nexpr, size, data.hex()))
+                                                except Exception as e:
+                                                    # if number fails, just continue with a default size and the original expr
+                                                    print("unknown size: %r.  using default size." % size)
 
                                         else:
+                                            va = parseExpression(emu, expr)
                                             data = emu.readMemory(va, size)
                                             print("[%s:%s] == %r" % (expr, size, data.hex()))
                                     except Exception as e:
@@ -1373,6 +1384,43 @@ class TestEmulator:
 
         for va, tva, data in self.emu.path[2].get('writelog'):
             insertComment(vw, va, "[W:%x] %r (%r)" % (tva, data.hex(), data))
+
+from envi.memory import MM_READ
+def readMemString(self, va, maxlen=0xfffffff, wide=False):
+    '''
+    Returns a C-style string from memory.  Stops at Memory Map boundaries, or the first NULL (\x00) byte.
+    '''
+
+    if wide:
+        term = b'\0\0'
+    else:
+        term = b'\0'
+
+    for mva, mmaxva, mmap, mbytes in self._map_defs:
+        if mva <= va < mmaxva:
+            mva, msize, mperms, mfname = mmap
+            if not mperms & MM_READ:
+                raise envi.SegmentationViolation(va)
+            offset = va - mva
+
+            # now find the end of the string based on either \x00, maxlen, or end of map
+            end = mbytes.find(term, offset)
+
+            left = end - offset
+            if end == -1:
+                # couldn't find the NULL byte
+                mend = offset + maxlen
+                cstr = mbytes[offset:mend]
+            else:
+                # couldn't find the NULL byte go to the end of the map or maxlen
+                if wide and (left & 1):
+                    left += 1
+                mend = offset + (maxlen, left)[left < maxlen]
+                cstr = mbytes[offset:mend]
+            return cstr
+
+    raise envi.SegmentationViolation(va)
+
 
 
 import vivisect.impemu.monitor as vi_mon
