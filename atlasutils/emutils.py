@@ -9,6 +9,7 @@ import traceback
 import collections
 
 import envi
+import envi.exc as e_exc
 import envi.memory as e_m
 import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
@@ -387,6 +388,16 @@ def getHeap(emu, initial_size=None):
 
 
 #### Win32 helper functions
+def Sleep(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    dwMS = cconv.getCallArgs(emu, 1)
+    print("Sleep: dwMillisectonds: %d" % (dwMS))
+    # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
+    time.sleep(dwMS/1000)
+    cconv.setReturnValue(emu, 0)
+    cconv.deallocateCallSpace(emu, 1)
+
 def HeapCreate(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
@@ -591,6 +602,279 @@ def doWin32StringCompare(emu, op, \
 
     return CSTR_FAILURE
 
+def vsnprintf(emu, op=None):
+    '''
+    Simplistic, but good enough for most government work...
+    '''
+    stackDump(emu)
+    ccname, cconv = getMSCallConv(emu, op.va, 'cdecl')
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    s, n, fmt, args = cconv.getCallArgs(emu, 4)
+    outfmt = emu.readMemString(fmt)
+
+    off = 0
+    arglist = []
+    if b'%' in outfmt:
+        bits = emu.readMemoryPtr(args + off)
+        if emu.getMemoryMap(bits):
+            arglist.append(emu.readMemString(bits))
+        else:
+            arglist.append(bits)
+        off += 4
+
+    while True:
+        #print(outfmt, tuple(arglist))
+        try:
+            out = outfmt % tuple(arglist)
+            break
+        except TypeError:
+            bits = emu.readMemoryPtr(args + off)
+            if emu.getMemoryMap(bits):
+                arglist.append(emu.readMemString(bits))
+            else:
+                arglist.append(bits)
+            off += 4
+
+    emu.writeMemory(s, out[:n])
+    result = len(out)
+
+    input("vsnprintf: %r" % out)
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 4)
+    
+
+class win32const:
+    FILE_ATTRIBUTE_ARCHIVE = 32 #(0x20) A file or directory that is an archive file or directory. Applications typically use this attribute to mark files for backup or removal .
+    FILE_ATTRIBUTE_COMPRESSED = 2048 #(0x800) A file or directory that is compressed. For a file, all of the data in the file is compressed. For a directory, compression is the default for newly created files and subdirectories.
+    FILE_ATTRIBUTE_DEVICE = 64 #(0x40) This value is reserved for system use.
+    FILE_ATTRIBUTE_DIRECTORY = 16 #(0x10) The handle that identifies a directory.
+    FILE_ATTRIBUTE_ENCRYPTED = 16384 #(0x4000) A file or directory that is encrypted. For a file, all data streams in the file are encrypted. For a directory, encryption is the default for newly created files and subdirectories.
+    FILE_ATTRIBUTE_HIDDEN = 2 #(0x2) The file or directory is hidden. It is not included in an ordinary directory listing.
+    FILE_ATTRIBUTE_INTEGRITY_STREAM = 32768 #(0x8000) The directory or user data stream is configured with integrity (only supported on ReFS volumes). It is not included in an ordinary directory listing. The integrity setting persists with the file if it's renamed. If a file is copied the destination file will have integrity set if either the source file or destination directory have integrity set.  Windows Server 2008 R2, Windows 7, Windows Server 2008, Windows Vista, Windows Server 2003 and Windows XP: This flag is not supported until Windows Server 2012.
+    FILE_ATTRIBUTE_NORMAL = 128 #(0x80) A file that does not have other attributes set. This attribute is valid only when used alone.
+    FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 8192 #(0x2000) The file or directory is not to be indexed by the content indexing service.
+    FILE_ATTRIBUTE_NO_SCRUB_DATA = 131072 #(0x20000) The user data stream not to be read by the background data integrity scanner (AKA scrubber). When set on a directory it only provides inheritance. This flag is only supported on Storage Spaces and ReFS volumes. It is not included in an ordinary directory listing.  Windows Server 2008 R2, Windows 7, Windows Server 2008, Windows Vista, Windows Server 2003 and Windows XP: This flag is not supported until Windows 8 and Windows Server 2012.
+    FILE_ATTRIBUTE_OFFLINE = 4096 #(0x1000) The data of a file is not available immediately. This attribute indicates that the file data is physically moved to offline storage. This attribute is used by Remote Storage, which is the hierarchical storage management software. Applications should not arbitrarily change this attribute.
+    FILE_ATTRIBUTE_READONLY = 1 #(0x1) A file that is read-only. Applications can read the file, but cannot write to it or delete it. This attribute is not honored on directories. For more information, see You cannot view or change the Read-only or the System attributes of folders in Windows Server 2003, in Windows XP, in Windows Vista or in Windows 7.
+    FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 4194304 #(0x400000) When this attribute is set, it means that the file or directory is not fully present locally. For a file that means that not all of its data is on local storage (e.g. it may be sparse with some data still in remote storage). For a directory it means that some of the directory contents are being virtualized from another location. Reading the file / enumerating the directory will be more expensive than normal, e.g. it will cause at least some of the file/directory content to be fetched from a remote store. Only kernel-mode callers can set this bit.
+    FILE_ATTRIBUTE_RECALL_ON_OPEN = 262144 #(0x40000) This attribute only appears in directory enumeration classes (FILE_DIRECTORY_INFORMATION, FILE_BOTH_DIR_INFORMATION, etc.). When this attribute is set, it means that the file or directory has no physical representation on the local system; the item is virtual. Opening the item will be more expensive than normal, e.g. it will cause at least some of it to be fetched from a remote store.
+    FILE_ATTRIBUTE_REPARSE_POINT = 1024 #(0x400) A file or directory that has an associated reparse point, or a file that is a symbolic link.
+    FILE_ATTRIBUTE_SPARSE_FILE = 512 #(0x200) A file that is a sparse file.
+    FILE_ATTRIBUTE_SYSTEM = 4 #(0x4) A file or directory that the operating system uses a part of, or uses exclusively.
+    FILE_ATTRIBUTE_TEMPORARY = 256 #(0x100) A file that is being used for temporary storage. File systems avoid writing data back to mass storage if sufficient cache memory is available, because typically, an application deletes a temporary file after the handle is closed. In that scenario, the system can entirely avoid writing the data. Otherwise, the data is written after the handle is closed.
+    FILE_ATTRIBUTE_VIRTUAL = 65536 #(0x10000) This value is reserved for system use.
+
+#### SYSENTER/SYSCALL helpers
+class SystemCallNotImplemented(Exception):
+    def __init__(self, callnum, emu, op):
+        Exception.__init__(self)
+        self.callnum = callnum
+        self.emu = emu
+        self.op = op
+
+    def __repr__(self):
+        return "SystemCall 0x%x (%d) not implemented at 0x%x: %r" % (self.callnum, self.op.va, self.op)
+
+class WinKernel(dict):
+    def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False):
+        dict.__init__(self)
+        self.emu = emu
+
+        if syswow:
+            arch = 'wow64'
+
+        self.modbase = 'vstruct.defs.windows.win_%s_%s_%s' % (vermaj, vermin, arch)
+        self.win32k = None
+        self.ntdll = None
+        self.ntoskrnl = None
+        try:
+            self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
+            self.ntdll = __import__(self.modbase + '.ntdll', {}, {}, 1)
+            self.ntoskrnl = __import__(self.modbase + '.ntoskrnl', {}, {}, 1)
+        except ImportError as e:
+            print("error importing VStructs for Windows %d.%d_%s: %r" % (vermaj, vermin, arch, e))
+        
+        # setup key files db here
+        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
+        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
+
+        # actual syscall handlers
+        self.win_syscalls = {    # worked up on Win7-32
+            0xd9: self.sys_win_NtQueryAttributesFile,  # ntdll.ntQueryAttributesFile
+            0xdc: self.sys_win_DbgQueryDebugFilterState,  # ntdll.DbgQueryDebugFilterState
+            0xb3: self.sys_win_NtOpenFile,
+            0x54: self.sys_win_NtCreateSection,
+            0xa8: self.sys_win_MapViewOfSection,
+            }
+
+
+    def op_sysenter(self, emu, op):
+        # handle select Windows syscalls
+        callnum = emu.getRegister(0)
+        syscall = self.win_syscalls.get(callnum)
+        if syscall is not None:
+            syscall(emu, op)
+
+        else:
+            raise SystemCallNotImplemented(callnum, emu, op)
+
+    def sys_win_DbgQueryDebugFilterState(self, emu, op):
+        stackDump(emu)
+        sp = emu.getStackCounter()
+        arg0 = emu.readMemoryPtr(sp + emu.psize)    # second RET
+        arg1 = emu.readMemoryPtr(sp + (2*emu.psize))
+        arg2 = emu.readMemoryPtr(sp + (3*emu.psize))
+
+        print("ntDbgQueryDebugFilterState( 0x%x, 0x%x )" % (arg1, arg2))
+        # for now
+        retval = 0
+        emu.setRegister(0, retval)
+
+    def getWinAbsTime(self, ts_since_unix_epoch):
+        return (11644473600 + ts_since_unix_epoch) * 10000000
+
+    def getUnixTime(self, ts_since_win_epoch):
+        return (ts_since_win_epoch / 10000000) - 11644473600
+
+    def parseUnicodeString(self, emu, addr):
+        UNICODE_STRING = self.ntdll.UNICODE_STRING()
+        UNICODE_STRING.vsParse(emu.readMemory(addr, len(UNICODE_STRING)))
+        return UNICODE_STRING
+
+
+    def sys_win_NtQueryAttributesFile(self, emu, op):
+        stackDump(emu)
+        sp = emu.getStackCounter()
+        arg0 = emu.readMemoryPtr(sp + emu.psize)
+        arg1 = emu.readMemoryPtr(sp + (2*emu.psize))
+        arg2 = emu.readMemoryPtr(sp + (3*emu.psize))
+
+        print("ntQueryAttributesFile( 0x%x, 0x%x )" % (arg1, arg2))
+
+        length, rootdir, objname, attrib, secdesc, secqos = \
+                emu.readMemoryFormat(arg1, "<IPPIPP")
+
+        if length > 40:
+            raise Exception("NtQueryAttributesFile.OBJECT_ATTRIBUTES length: 0x%x (wrong pointer?)" % length)
+
+        fullpathstruct = self.parseUnicodeString(emu, objname)
+        fullpath = emu.readMemory(fullpathstruct.Buffer, fullpathstruct.Length)
+
+        if rootdir != 0:
+            rootdirstruct = self.parseUnicodeString(emu, rootdir)
+            fullpath = emu.readMemory(rootdirstruct.Buffer, rootdirstruct.Length) + fullpath
+
+        print("FullPath: %r" % fullpath)
+        # work in ROOTPATH here... right now, just fake
+        f = self['fs'][fullpath]
+        f['attribmask'] = attrib
+        f['secqosptr'] = secqos
+        f['secdescptr'] = secdesc
+        # need to check the file 
+
+        # FAKE NEWS!
+        WriteTime = int(self.getWinAbsTime(time.time()))
+        ChangeTime = int(self.getWinAbsTime(time.time()))
+        AccessTime = int(self.getWinAbsTime(time.time()))
+        CreationTime = int(self.getWinAbsTime(time.time()))
+        Attributes = attrib
+
+        print("len:%x rootdir:%x objname:%x attrib:%x secdesc:%x secqos:%x" %(length, rootdir, objname, attrib, secdesc, secqos))
+        
+        # now we need to write the output data!
+        emu.writeMemoryFormat(arg2, '<QQQQI', CreationTime, AccessTime, WriteTime, ChangeTime, Attributes)
+
+        import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+        # for now
+        retval = 0  # STATUS_SUCCESS
+        emu.setRegister(0, retval)
+
+    def sys_win_NtOpenFile(self, emu, op):
+        stackDump(emu)
+        sp = emu.getStackCounter()
+        arg0 = emu.readMemoryPtr(sp + emu.psize)
+        arg1 = emu.readMemoryPtr(sp + (2*emu.psize))    # out: FileHandle
+        arg2 = emu.readMemoryPtr(sp + (3*emu.psize))    # in: DesiredAccess
+        arg3 = emu.readMemoryPtr(sp + (4*emu.psize))    # in: ObjectAttributes
+        arg4 = emu.readMemoryPtr(sp + (5*emu.psize))    # out: IoStatusBlock
+        arg5 = emu.readMemoryPtr(sp + (6*emu.psize))    # in: ShareAccess
+        arg6 = emu.readMemoryPtr(sp + (7*emu.psize))    # in: OpenOptions
+
+        print("ntOpenFile( 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x )" % (arg1, arg2, arg3, arg4, arg5, arg6))
+        length, rootdir, objname, attrib, secdesc, secqos = \
+                emu.readMemoryFormat(arg3, "<IPPIPP")
+        print("  OBJECT_ATTRIBUTES: %r %r %r %r %r %r" % (length, rootdir, objname, attrib, secdesc, secqos))
+        import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+
+        # for now
+        retval = 0
+        emu.setRegister(0, retval)
+
+    def sys_win_NtCreateSection(self, emu, op):
+        stackDump(emu)
+        ### NOT DONE
+        sp = emu.getStackCounter()
+        arg0 = emu.readMemoryPtr(sp + emu.psize)
+        arg1 = emu.readMemoryPtr(sp + (2*emu.psize))
+        arg2 = emu.readMemoryPtr(sp + (3*emu.psize))
+        arg3 = emu.readMemoryPtr(sp + (4*emu.psize))
+        arg4 = emu.readMemoryPtr(sp + (5*emu.psize))
+        arg5 = emu.readMemoryPtr(sp + (6*emu.psize))
+
+        print("ntCreateSection( 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x )" % (arg0, arg1, arg2, arg3, arg4, arg5))
+        import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+        # for now
+        retval = 0
+        emu.setRegister(0, retval)
+
+    def sys_win_MapViewOfSection(self, emu, op):
+        stackDump(emu)
+        ### NOT DONE
+        sp = emu.getStackCounter()
+        arg0 = emu.readMemoryPtr(sp + emu.psize)
+        arg1 = emu.readMemoryPtr(sp + (2*emu.psize))
+        arg2 = emu.readMemoryPtr(sp + (3*emu.psize))
+        arg3 = emu.readMemoryPtr(sp + (4*emu.psize))
+        arg4 = emu.readMemoryPtr(sp + (5*emu.psize))
+        arg5 = emu.readMemoryPtr(sp + (6*emu.psize))
+
+        print("ntMapViewOfSection( 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x )" % (arg0, arg1, arg2, arg3, arg4, arg5))
+        import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+        # for now
+        retval = 0
+        emu.setRegister(0, retval)
+
+
+class LinuxKernel(dict):
+    def __init__(self, emu):
+        dict.__init__(self)
+        self.emu = emu
+
+        
+        # setup key files db here
+        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
+        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
+
+        # actual syscall handlers
+        win_syscalls = {
+            }
+
+
+    def op_sysenter(krnl, emu, op):
+        # handle select Windows syscalls
+        callnum = emu.getRegister(0)
+        syscall = krnl.win_syscalls.get(callnum)
+        if syscall is not None:
+            syscall(emu, op)
+
+        else:
+            raise SystemCallNotImplemented(callnum, emu, op)
+
+
 #### posix function helpers
 def malloc(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
@@ -674,6 +958,7 @@ import_map = {
         '*.strncpy': strncpy,
         '*.memcpy': memcpy,
         '*.memset': memset,
+        'kernel32.Sleep': Sleep,
         'kernel32.HeapAlloc': HeapAlloc,
         'kernel32.HeapFree': HeapFree,
         'kernel32.HeapReAlloc': HeapReAlloc,
@@ -688,17 +973,94 @@ import_map = {
         'kernel32.TlsSetValue': TlsSetValue,
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
+        'ntdll._vsnprintf': vsnprintf,
         }
 
+def backTrace(emu):
+    '''
+    Work through the emulator stack looking for return pointers
+    '''
+    sp = emu.getStackCounter()
+    stackmap = emu.getMemoryMap(sp)
+    stacktop = stackmap[0] + stackmap[1]
+    while sp < stacktop:
+        #print("[D] 0x%x < 0x%x" % (sp, stacktop))
+        cur = emu.readMemoryPtr(sp)
+        curmap = emu.getMemoryMap(cur)
+        if curmap:
+            cmmva, cmmsz, cmmperms, cmmname = curmap
+            tmpva = max(cur-7, curmap[0])
+            tmpsz = cur - tmpva
+            prevmem = emu.readMemory(tmpva, tmpsz)
+
+            while tmpva < cur:
+                try:
+                    op = emu.parseOpcode(tmpva)
+                    #print("0x%x: %r" % (op.va, op))
+                except:
+                    tmpva += 1
+                    continue
+
+                if tmpva + len(op) == cur and op.isCall():
+                    # this looks like a good call in our call stack
+                    tgtfname = 'None'
+                    if self.vw:
+                        funcname = self.vw.getName(self.vw.getFunction(op.va))
+                        tgtvas = [bva for bva, bflags in op.getBranches(emu=emu) if not bflags & envi.BR_FALL]
+                        if len(tgtvas) and self.vw:
+                            tgtva = tgtvas[0]
+                            tgtfname = self.vw.getName(tgtva)
+
+                    print("%r   %r   0x%x -> %r" % (cmmname, funcname, op.va, tgtfname))
+                tmpva += 1
+    
+        sp += emu.psize
+
+
+def stackDump(emu, count=16):
+    '''
+    Dump Stack, including derefs
+    '''
+    # TODO: recurse through pointers
+    # TODO: list registers that point at any of the pointers/stackaddrs
+    print("Stack Dump:")
+    sp = emu.getStackCounter()
+    for x in range(count):
+        val = emu.readMemoryPtr(sp)
+        valmap = emu.getMemoryMap(val)
+        if valmap and emu.vw:
+            bytesleft = (valmap[0] + valmap[1]) - val
+            if bytesleft >= emu.psize:
+                valptr = emu.readMemoryPtr(val)
+                if emu.getMemoryMap(valptr):    # isValidPointer for emus
+                    strdata = hex(valptr)
+                else:
+                    strdata = repr(emu.readMemory(val, min(24, bytesleft)))
+            else:
+                strdata = repr(emu.readMemory(val, bytesleft))
+
+            print("\t0x%x:\t0x%x \t-> %s" % (sp, val, strdata))
+        else:
+            print("\t0x%x:\t0x%x" % (sp, val))
+        sp += emu.psize
+
+def heapDump(emu):
+    '''
+    Dump the Heap allocations
+    '''
+    print("Stack Dump:")
+    heap = getHeap(emu)
+    print(heap.dump())
+
 class TestEmulator:
-    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None):
+    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookbyname=False):
         self.vw = None
         self.vwg = None
 
         self.emu = emu
 
         if vw is not None:
-            self.vw = vw
+            self.vw = emu.vw = vw
             self.vwg = self.vw.getVivGui()
         elif hasattr(emu, 'vw'):
             self.vw = emu.vw
@@ -710,7 +1072,7 @@ class TestEmulator:
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
-        self.hookImports()
+        self.hookImports(byname=hookbyname)
 
         self.teb = None
         self.peb = None
@@ -718,6 +1080,9 @@ class TestEmulator:
             self.initFakePEB()
 
     def initFakePEB(self):
+        '''
+        This is currently i386 only
+        '''
         peb = findNewMemoryMapSpace(self.emu, PEBSZ, 0x7ffd3000)
         self.emu.addMemoryMap(peb, 6, 'FakePEB', b'\0'*PEBSZ)
         teb = findNewMemoryMapSpace(self.emu, TEBSZ, 0x7ffdc000)
@@ -734,13 +1099,27 @@ class TestEmulator:
             self.emu.setSegmentInfo(e_amd64.SEG_GS, teb, TEBSZ)
 
 
-    def hookImports(self):
+    def hookImports(self, byname=False):
         if not hasattr(self.emu, 'vw') or self.emu.vw is None:
             return
 
         for impva, impsz, imptype, impname in self.emu.vw.getImports():
             if impname in import_map:
                 self.call_handlers[impva] = import_map.get(impname)
+
+        if not byname:
+            return
+
+        for va, name in self.emu.vw.getNames():
+            #print(name, '%.8x' % va)
+            if name.endswith("%.8x" % va):
+                name = name[:-9]
+                #print("checking %r" % name)
+
+
+            if name in import_map:
+                self.call_handlers[va] = import_map.get(name)
+                print("Mapping call_handler by *name*: %r => 0x%x" % (name, va))
 
     def printMemStatus(self, op=None, use_cached=False):
         emu = self.emu
@@ -881,19 +1260,19 @@ class TestEmulator:
             print("no flags: ", e)
 
 
-    def stackDump(self):
+    def backTrace(self):
         emu = self.emu
-        print("Stack Dump:")
-        sp = emu.getStackCounter()
-        for x in range(16):
-            print("\t0x%x:\t0x%x" % (sp, emu.readMemValue(sp, emu.psize)))
-            sp += emu.psize
+        backTrace(self)
+
+    def stackDump(self, count=16):
+        # TODO: recurse through pointers
+        # TODO: list registers that point at any of the pointers/stackaddrs
+        emu = self.emu
+        stackDump(self, count)
 
     def heapDump(self):
         emu = self.emu
-        print("Stack Dump:")
-        heap = getHeap(emu)
-        print(heap.dump())
+        heapDump(emu)
 
     def printStats(self, i):
         curtime = time.time()
@@ -949,6 +1328,15 @@ class TestEmulator:
 
         '''
         emu = self.emu
+        self.op_handlers = {}   # for instructions like 'sysenter' which are not supported by the emu
+
+        plat = emu.vw.getMeta('Platform')
+        if plat.startswith('win'):
+            self.kernel = WinKernel(emu)
+        elif plat.startswith('linux'):
+            self.kernel = LinuxKernel(emu)
+
+        self.op_handlers['sysenter'] = self.kernel.op_sysenter
 
         mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
         self.mcanv = mcanv  # store it for later inspection
@@ -1077,6 +1465,11 @@ class TestEmulator:
                                     print("silent until 0x%x" % silentUntil)
                                     silent = True
 
+                                elif uinp in ('backtrace', 'bt'):
+                                    self.backTrace()
+                                    moveon = True
+                                    break
+
                                 elif uinp.startswith('go '):
                                     args = uinp.split(' ')
 
@@ -1087,12 +1480,25 @@ class TestEmulator:
                                         nonstop = 1
                                     break
 
+                                elif uinp == 'ni':
+                                    # next instruction (eg. skip over a call)
+                                    nonstop = nextva
+                                    break
+
                                 elif uinp in ('b', 'branch'):
                                     emuBranch = True
                                     break
 
-                                elif uinp == 'stack':
-                                    self.stackDump()
+                                elif uinp.startswith('stack'):
+                                    count=16
+                                    if ' ' in uinp:
+                                        cmd, ctstr = uinp.split(' ', 1)
+                                        try:
+                                            count = int(ctstr, 0)
+                                        except ValueError as e:
+                                            print(e)
+
+                                    self.stackDump(count)
                                     moveon = True
                                     break
 
@@ -1164,6 +1570,9 @@ class TestEmulator:
                                             elif nsize in ('w', 'W'):
                                                 data = readMemString(emu, va, wide=True)
                                                 print("[%s] == %r" % (expr, data))
+                                            elif nsize in ('u', 'U'):
+                                                data = readMemString(emu, va, wide=True)
+                                                print("[%s] == %r" % (expr, data.decode('utf-16le')))
                                             else:
                                                 try:
                                                     size = parseExpression(emu, nsize)
@@ -1282,7 +1691,30 @@ class TestEmulator:
 
                 # if not already emulated a call, execute the instruction here...
                 if not skip and not skipop:
-                    emu.stepi()
+                    # execute opcode.  if unsupported, look for op_handlers
+                    failed = False
+                    try:
+                        emu.stepi()
+                    except e_exc.UnsupportedInstruction:
+                        failed = True
+
+                    # check for failure, and look for an op_handler. then raise an exception
+                    if failed:
+                        ophndlr = self.op_handlers.get(op.mnem)
+
+                        if ophndlr is not None:
+                            print("opcode handler: %r" % ophndlr)
+                            newpc = ophndlr(emu, op)
+                            if not newpc:
+                                newpc = op.va + len(op)
+
+                            emu.setProgramCounter(newpc)
+
+                        else:
+                            import sys
+                            sys.excepthook(*sys.exc_info())
+                            break
+
 
                     # print the updated latest stuff....
                     if showafter:
@@ -1314,6 +1746,7 @@ class TestEmulator:
             except:
                 import sys
                 sys.excepthook(*sys.exc_info())
+                nonstop = 0
 
         self.printStats(i)
 
