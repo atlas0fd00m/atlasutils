@@ -500,20 +500,61 @@ def SetLastError(emu, op=None):
     last_error, = cconv.getCallArgs(emu, 1)
     cconv.deallocateCallSpace(emu, 1)
 
+def GetCurrentThreadId(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+
+    cconv.setReturnValue(emu, 0x31337)
+    cconv.deallocateCallSpace(emu, 0)
+
+# TODO: wrap this into a TLS object and strap it into the emulator like we do with the Heap
+tls_idxs = []
+tls_next_idx = 100
 tls_data = collections.defaultdict(list)
+
+def rtTlsAlloc():
+    global tls_idxs, tls_next_idx, tls_data
+    idx = tls_next_idx
+    tls_idxs.append(idx)
+    tls_next_idx+= 1
+    return idx
+
+def rtTlsGetValue(slot):
+    '''
+    Returns None if nothing exists. By design.
+    '''
+    global tls_data
+    if len(tls_data[slot]):
+        return tls_data[slot][-1]
+
+
+def rtTlsSetValue(slot, data):
+    global tls_data
+    tls_data[slot].append(data)
+    return 1
+
+
+def TlsAlloc(emu, op=None):
+    # should we track this in the emulator?
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+
+    cconv.setReturnValue(emu, rtTlsAlloc())
+    cconv.deallocateCallSpace(emu, 0)
+
 def TlsGetValue(emu, op=None):
     global tls_data
     ccname, cconv = getMSCallConv(emu, op.va)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     slot, = cconv.getCallArgs(emu, 1)
-    if len(tls_data[slot]):
-        data = tls_data[slot][-1]
 
-    else:
-        data = emu.setVivTaint('TlsGetValue::Slot at 0x%x' % op.va, slot)
-        tls_data[slot].append(data)
+    tlsval = rtTlsGetValue(slot)
 
-    cconv.setReturnValue(emu, data)
+    if not tlsval:  # do this here since we have an op and emu already, and it makes sense
+        tlsval = emu.setVivTaint('TlsGetValue::Slot at 0x%x' % op.va, slot)
+        rtTlsSetValue(slot, tlsval)
+
+    cconv.setReturnValue(emu, tlsval)
     cconv.deallocateCallSpace(emu, 1)
 
 def TlsSetValue(emu, op=None):
@@ -521,10 +562,10 @@ def TlsSetValue(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     slot, data = cconv.getCallArgs(emu, 2)
-    tls_data[slot].append(data)
 
-    cconv.setReturnValue(emu, slot)
+    cconv.setReturnValue(emu, rtTlsSetValue(slot, data))
     cconv.deallocateCallSpace(emu, 2)
+
 
 def CompareStringEx(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -969,8 +1010,10 @@ import_map = {
         'kernel32.LeaveCriticalSection': LeaveCriticalSection,
         'kernel32.GetLastError': GetLastError,
         'kernel32.SetLastError': SetLastError,
+        'kernel32.TlsAlloc': TlsAlloc,
         'kernel32.TlsGetValue': TlsGetValue,
         'kernel32.TlsSetValue': TlsSetValue,
+        'kernel32.GetCurrentThreadId': GetCurrentThreadId,
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
         'ntdll._vsnprintf': vsnprintf,
@@ -1268,7 +1311,7 @@ class TestEmulator:
         # TODO: recurse through pointers
         # TODO: list registers that point at any of the pointers/stackaddrs
         emu = self.emu
-        stackDump(self, count)
+        stackDump(emu, count)
 
     def heapDump(self):
         emu = self.emu
