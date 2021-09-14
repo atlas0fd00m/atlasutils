@@ -37,12 +37,12 @@ def go(stopOnExc=False):
 	        print av.printStuff(t)
             except Exception, e:
                 print e
-	    # just for quals pp500
-	    #print av.XW(t, 0x8052264, 20)
-	    #fixme: if exception in tracer, drop to interactive mode
+	    
+            #fixme: if exception in tracer, drop to interactive mode
             if t.metadata['PendingSignal'] != None and stopOnExc:
                 print "Caught Signal, returning to interactive python (you did use -i or ipython, right?."
                 return 1
+
     except KeyboardInterrupt:
 	print "Caught Ctrl-C, returning to interactive python (if you ran it that way)."
         t.sendBreak()

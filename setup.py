@@ -7,12 +7,12 @@ mods = []
 pkgdata = {}
 scripts = []
 for s in os.listdir('scripts'):
-        if s != '.svn':
-                scripts.append('scripts/%s'%s)
+    if s != '.git':
+        scripts.append('scripts/%s'%s)
 
 
-setup  (name        = 'atlas utility belt',
-        version     = '2.5',
+setup  (name        = 'atlasutils',
+        version     = '3.0',
         description = 'atlas\' hacking toolbelt full of toys',
         author = 'atlas of d00m',
         author_email = 'atlas@r4780y.com',

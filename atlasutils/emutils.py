@@ -527,6 +527,8 @@ def rtTlsGetValue(slot):
     if len(tls_data[slot]):
         return tls_data[slot][-1]
 
+    print("rtTlsGetValue(%d) returning None, sorry..." % slot)
+
 
 def rtTlsSetValue(slot, data):
     global tls_data
@@ -549,8 +551,9 @@ def TlsGetValue(emu, op=None):
     slot, = cconv.getCallArgs(emu, 1)
 
     tlsval = rtTlsGetValue(slot)
+    print("TlsGetValue(%d): found %r" % (slot, tlsval))
 
-    if not tlsval:  # do this here since we have an op and emu already, and it makes sense
+    if tlsval is None:  # do this here since we have an op and emu already, and it makes sense
         tlsval = emu.setVivTaint('TlsGetValue::Slot at 0x%x' % op.va, slot)
         rtTlsSetValue(slot, tlsval)
 
@@ -1525,7 +1528,8 @@ class TestEmulator:
 
                                 elif uinp == 'ni':
                                     # next instruction (eg. skip over a call)
-                                    nonstop = nextva
+                                    nonstop = 1
+                                    tova = nextva
                                     break
 
                                 elif uinp in ('b', 'branch'):
