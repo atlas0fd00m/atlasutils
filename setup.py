@@ -12,7 +12,7 @@ for s in os.listdir('scripts'):
 
 
 setup  (name        = 'atlasutils',
-        version     = '3.0',
+        version     = '3.0.1',
         description = 'atlas\' hacking toolbelt full of toys',
         author = 'atlas of d00m',
         author_email = 'atlas@r4780y.com',

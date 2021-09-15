@@ -1099,7 +1099,17 @@ def heapDump(emu):
     print(heap.dump())
 
 class TestEmulator:
-    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookbyname=False):
+    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookfuncsbyname=False):
+        '''
+        Instiate a TestEmulator harness.  This holds and controls an emulator object.
+
+        emu -       an existing emulator
+        vw -        VivWorkspace object to build an emulator from
+        verbose -   print log messages
+        fakePEB -   set up fake PEB/TEB memoryspaces and setup the appropriate segment
+        guiFuncGraphName - name of the gui window to send location info to (nav info)
+        hookbyname - should we 
+        '''
         self.vw = None
         self.vwg = None
 
@@ -1118,7 +1128,7 @@ class TestEmulator:
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
-        self.hookImports(byname=hookbyname)
+        self.hookFuncs(importonly = not hookfuncsbyname)
 
         self.teb = None
         self.peb = None
@@ -1142,10 +1152,10 @@ class TestEmulator:
         if self.emu.psize == 4:
             self.emu.setSegmentInfo(e_i386.SEG_FS, teb, TEBSZ)
         else:
-            self.emu.setSegmentInfo(e_amd64.SEG_GS, teb, TEBSZ)
+            self.emu.setSegmentInfo(e_i386.SEG_GS, teb, TEBSZ)
 
 
-    def hookImports(self, byname=False):
+    def hookFuncs(self, importonly=True):
         if not hasattr(self.emu, 'vw') or self.emu.vw is None:
             return
 
@@ -1153,7 +1163,7 @@ class TestEmulator:
             if impname in import_map:
                 self.call_handlers[impva] = import_map.get(impname)
 
-        if not byname:
+        if importonly:
             return
 
         for va, name in self.emu.vw.getNames():
