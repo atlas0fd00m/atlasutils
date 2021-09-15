@@ -1318,7 +1318,7 @@ class TestEmulator:
 
     def backTrace(self):
         emu = self.emu
-        backTrace(self)
+        backTrace(emu)
 
     def stackDump(self, count=16):
         # TODO: recurse through pointers

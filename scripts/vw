@@ -16,13 +16,6 @@ import readline
 import rlcompleter
 readline.parse_and_bind("tab: complete")
 
-try:
-    import atlasonly.codepaths as acp
-    import atlasonly.symboliks as asymbx
-    import atlasonly.symboliks.analyze as as_analyze
-except:
-    pass
-
 import cobra
 
 import envi
@@ -42,6 +35,9 @@ import vivisect.symboliks.analysis as vs_anal
 import vivisect.symboliks.archs.i386 as vs_i386
 from vivisect.const import *
 from pprint import pprint
+
+import atlasutils.emutils as aemu
+
 
 if sys.version_info.major == 3:
     from importlib import reload
@@ -75,15 +71,12 @@ if provided, the file/vivworkspace provided on the commandline has been instanti
 other objects at the ready:
     vw - the vivisect workspace object (locked and loaded)
     emu - the appropriate envi emulator for the vw
+    temu - emutils TestEmulator wrapping the emu (if exists)
     i3t - if the vw is an i386 bin, this is the i386 symbolik translator object
     symemu - if the vw is an i386 bin, this is the symbolik emulator object
     sctx - symboliks analysis context for this workspace
 
 also, a few modules have been imported:
-    import atlasonly.codepaths as acp
-    import atlasonly.symboliks as asymbx
-    import atlasonly.symboliks.analyze as as_analyze
-
     import envi
     import envi.archs.i386 as e_i386
 
@@ -617,7 +610,9 @@ def setupVW(vw):
             print("waiting....")
             count -= 1
             time.sleep(.1)
-        gbls['emu'] = vw.getEmulator()
+        emu = gbls['emu'] = vw.getEmulator()
+        temu = gbls['temu'] = aemu.TestEmulator(emu)
+
     except Exception as e:
         if vw is not None:print("\n\t" + '\n\t'.join(["%s: \t%s" % (k,v) for k,v in vw.metadata.items()]))
         print("FAILED to get Emulator: %s" % e)

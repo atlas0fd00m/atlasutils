@@ -1,10 +1,13 @@
-import sys
 import os
-from distutils.core import setup, Extension
+import sys
+from setuptools import find_packages, setup
 
-packages = ['atlasutils', 'atlasutils.vtraceutils']
+VERSION = '3.0.1'
+desc = 'atlas\' hacking toolbelt full of toys'
+
 mods = []
-pkgdata = {}
+pkgdata = {'vivscripts': ['vivscripts/*']}
+
 scripts = []
 for s in os.listdir('scripts'):
     if s != '.git':
@@ -12,12 +15,13 @@ for s in os.listdir('scripts'):
 
 
 setup  (name        = 'atlasutils',
-        version     = '3.0.1',
-        description = 'atlas\' hacking toolbelt full of toys',
+        version     = VERSION,
+        description = desc,
+        long_description=desc,
+        long_description_content_type='text/markdown',
         author = 'atlas of d00m',
         author_email = 'atlas@r4780y.com',
-        #include_dirs = ['psyco','PyElf-0.8',],
-        packages  = packages,
+        packages = find_packages(),
         package_data = pkgdata,
         ext_modules = mods,
         scripts = scripts
