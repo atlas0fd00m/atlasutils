@@ -1363,11 +1363,26 @@ class TestEmulator:
         that the operands may point to in memory (as appropriate).
 
         special features:
+        [ function arguments ]
         * tracedict allows code to be evaluated and printed at specific addresses: 
                 tracedict={va:'python code here', 'locals':{'something':4}}
 
-        * prints out the operands *after* exection as well  (arg:showafter=True) 
+        * call_handlers dict (global in the library) allows swapping in our python code in place of 
+            calls to other binary code, like memcpy, or other code which may fail in an emulator
 
+        * follow - should the emulator follow calls?
+
+        * showafter - show memory and operands *after* emulating the instruction
+
+        * runTil - duplication of "finish" - will be removed in the future
+        
+        * pause - do we stop at each instruction?
+        
+        * silent - do we print out status after each instruction?
+        
+        * finish - when the Program Counter reaches this address, stop
+        
+        [ interactive cli ]
         * cli interface allows viewing and modifying memory/python objects:
                 rax
                 [rax]
@@ -1397,9 +1412,6 @@ class TestEmulator:
                 strcat
                 strlen
         
-        * call_handlers dict (global in the library) allows swapping in our python code in place of 
-            calls to other binary code, like memcpy, or other code which may fail in an emulator
-
         '''
         emu = self.emu
         self.op_handlers = {}   # for instructions like 'sysenter' which are not supported by the emu
