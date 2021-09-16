@@ -2,7 +2,7 @@ import os
 import sys
 from setuptools import find_packages, setup
 
-VERSION = '3.0.1'
+VERSION = '3.0.2'
 desc = 'atlas\' hacking toolbelt full of toys'
 
 mods = []
