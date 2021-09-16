@@ -921,6 +921,9 @@ class LinuxKernel(dict):
 
 #### posix function helpers
 def malloc(emu, op=None):
+    '''
+    emulator hook for malloc calls
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     size, = cconv.getCallArgs(emu, 1)
@@ -933,7 +936,10 @@ def malloc(emu, op=None):
     cconv.setReturnValue(emu, allocated_ptr)
     cconv.deallocateCallSpace(emu, 0)
 
-def free(emu):
+def free(emu, op=None):
+    '''
+    emulator hook for free calls
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     va = cconv.getCallArgs(emu, 1)
@@ -942,6 +948,9 @@ def free(emu):
     cconv.deallocateCallSpace(emu, 0)
 
 def realloc(emu, op=None):
+    '''
+    emulator hook for realloc calls
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
     existptr, size, = cconv.getCallArgs(emu, 2)
@@ -952,23 +961,32 @@ def realloc(emu, op=None):
     cconv.setReturnValue(emu, allocated_ptr)
     cconv.deallocateCallSpace(emu, 0)
 
-def skip(emu, op):
-    emu.setProgramCounter(emu.getProgramCounter()+len(op))
-
 def ret0(emu, op):
+    '''
+    emulator hook to just return 0
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.setReturnValue(emu, 0)
 
 def ret1(emu, op):
+    '''
+    emulator hook to just return 1
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.setReturnValue(emu, 1)
 
 def retneg1(emu, op):
+    '''
+    emulator hook to just return -1
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.setReturnValue(emu, -1)
 
 
 def syslog(emu, op=None):
+    '''
+    emulator hook for calls to syslog
+    '''
     ccname, cconv = getLibcCallConv(emu)
     cconv.allocateReturnAddress(emu)    # this assumes we've called
 
@@ -1389,7 +1407,8 @@ class TestEmulator:
         plat = emu.vw.getMeta('Platform')
         if plat.startswith('win'):
             self.kernel = WinKernel(emu)
-        elif plat.startswith('linux'):
+        #elif plat.startswith('linux') or plat:
+        else:   # FIXME: need to make Elf identification better!!
             self.kernel = LinuxKernel(emu)
 
         self.op_handlers['sysenter'] = self.kernel.op_sysenter
@@ -1652,6 +1671,7 @@ class TestEmulator:
                                     skipop = True
                                     break
 
+                                # the following functions are DEPRECATED
                                 elif uinp == 'memset':
                                     print(memset(emu))
                                     skipop = True
