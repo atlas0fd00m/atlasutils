@@ -21,6 +21,8 @@ import vivisect
 import visgraph.pathcore as vg_path
 from binascii import hexlify, unhexlify
 
+from atlasutils.errno import *
+
 
 SNAP_NORM = 0
 SNAP_CAP = 1
@@ -182,6 +184,28 @@ def strncpy(emu, op=None):
     nulloc = data.find(b'\0')
     if nulloc != -1:
         data = data[:nulloc]
+    emu.writeMemory(dest, data)
+    print(data)
+    cconv.setReturnValue(emu, dest)
+    cconv.deallocateCallSpace(emu, 0)
+    return data
+
+def strncpy_s(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    dest, destsz, src, length = cconv.getCallArgs(emu, 4)
+    
+    length = min(destsz, length)
+    data = emu.readMemory(src, length)
+
+    nulloc = data.find(b'\0')
+    if nulloc != -1:
+        data = data[:nulloc]
+
+    data += b'\0'
+
+    # check to see if need to return an error??
+
     emu.writeMemory(dest, data)
     print(data)
     cconv.setReturnValue(emu, dest)
@@ -686,6 +710,224 @@ def vsnprintf(emu, op=None):
     cconv.setReturnValue(emu, result)
     cconv.deallocateCallSpace(emu, 4)
     
+def getenv_s(emu, op=None):
+    '''
+    Get Environment Variables....
+    Since we don't have any environment variables, 
+    '''
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    '''    size_t *pReturnValue,
+           char* buffer,
+           size_t numberOfElements,
+           const char *varname'''
+    pRetVal, buff, numElem, varnameptr = cconv.getCallArgs(emu, 4)
+    # grab some fake Environment variable string...
+    temu = emu.temu
+    vw = temu.vw
+    varname = temu.emu.readMemString(varnameptr)
+    print("getenv_s(0x%x, 0x%x, 0x%x, %r)" % (pRetVal, buff, numElem, varname))
+
+    os = vw.getMeta('Platform')
+    if os in ('windows', 'winkern'):
+        # case-insensitive... everything must be UPPERs
+        varname = varname.upper()
+
+    # lookup the env var:
+    val = temu.environment.get(varname)
+
+    # figure out how to return
+    if not pRetVal:
+        # can't actually put any meaningful response.
+        print("no pRetVal! EINVAL")
+        result = EINVAL
+
+    elif val is None:
+        # throw a tantrum, couldn't find it mom!
+        emu.writeMemoryPtr(pRetVal, 0)
+        result = EINVAL
+        print("couldn't find %r! EINVAL" % varname)
+
+    else:
+        # found it...
+        if not buff or numElem == 0:
+            # just return the size requirements
+            emu.writeMemoryPtr(pRetVal, len(val))
+
+        else:
+            # write out as much as we can...
+            emu.writeMemory(buff, val[:numElem])
+        result = 0
+
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 0)
+
+INVALID_FILE_ATTRIBUTES = -1
+def GetFileAttributesA(emu, op=None):
+    '''
+    Return attributes of a file or directory.
+    '''
+    ccname, cconv = getMSCallConv(emu, op.va)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    lpFileName, = cconv.getCallArgs(emu, 1)
+    filename = emu.readMemString(lpFileName).upper()
+
+    fsentry = emu.temu.fs.get(filename)
+    if not fsentry:
+        result = INVALID_FILE_ATTRIBUTES
+
+    else:
+        lstat, fdata = fsentry
+        result = lstat
+
+    cconv.setReturnValue(emu, result)
+    cconv.deallocateCallSpace(emu, 1)
+
+
+
+#### posix function helpers
+def malloc(emu, op=None):
+    '''
+    emulator hook for malloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    size, = cconv.getCallArgs(emu, 1)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size)
+    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
+
+    #cconv.setReturnValue(emu, allocated_ptr)
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
+
+def calloc(emu, op=None):
+    '''
+    emulator hook for malloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    elements, size = cconv.getCallArgs(emu, 2)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size * elements)
+    print("calloc(0x%x, 0x%x)  => 0x%x" % (elements, size, allocated_ptr))
+
+    #cconv.setReturnValue(emu, allocated_ptr)
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
+
+def free(emu, op=None):
+    '''
+    emulator hook for free calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    va = cconv.getCallArgs(emu, 1)
+    print("FREE: 0x%x" % va)
+    cconv.setReturnValue(emu, 0)
+    cconv.deallocateCallSpace(emu, 0)
+
+def realloc(emu, op=None):
+    '''
+    emulator hook for realloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+    existptr, size, = cconv.getCallArgs(emu, 2)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.realloc(existptr, size)
+
+    cconv.setReturnValue(emu, allocated_ptr)
+    cconv.deallocateCallSpace(emu, 0)
+
+def ret0(emu, op):
+    '''
+    emulator hook to just return 0
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, 0)
+
+def ret1(emu, op):
+    '''
+    emulator hook to just return 1
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, 1)
+
+def retneg1(emu, op):
+    '''
+    emulator hook to just return -1
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.setReturnValue(emu, -1)
+
+
+def syslog(emu, op=None):
+    '''
+    emulator hook for calls to syslog
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.allocateReturnAddress(emu)    # this assumes we've called
+
+    loglvl, strlength = cconv.getCallArgs(emu, 2)
+    string = readString(emu, strlength)
+    count = string.count('%')
+    neg2 = string.count('%%')
+    count -= (2*neg2)
+
+    args = cconv.getCallArgs(emu, count+2)[2:]
+    outstring = string % args
+    print("SYSLOG(%d): %s" % (loglvl, outstring))
+    for s in args:
+        if emu.isValidPointer(s):
+            print("\t" + readString(emu, s))
+    cconv.setReturnValue(emu, 0)
+    cconv.deallocateCallSpace(emu, 0)
+
+def nop(emu, op=None):
+    pass
+
+import_map = {
+        '*.syslog': syslog,
+        '*.malloc': malloc,
+        '*.calloc': calloc,
+        '*.free': free,
+        '*.realloc': realloc,
+        '*.strlen': strlen,
+        '*.strcmp': strcmp,
+        '*.strcat': strcat,
+        '*.strcpy': strcpy,
+        '*.strncpy': strncpy,
+        '*.memcpy': memcpy,
+        '*.memset': memset,
+        'kernel32.Sleep': Sleep,
+        'kernel32.HeapAlloc': HeapAlloc,
+        'kernel32.HeapFree': HeapFree,
+        'kernel32.HeapReAlloc': HeapReAlloc,
+        'kernel32.HeapDestroy': HeapDestroy,
+        'kernel32.HeapCreate': HeapCreate,     # malloc takes care of this
+        'kernel32.InitializeCriticalSection': InitializeCriticalSection,
+        'kernel32.EnterCriticalSection': EnterCriticalSection,
+        'kernel32.LeaveCriticalSection': LeaveCriticalSection,
+        'kernel32.GetLastError': GetLastError,
+        'kernel32.SetLastError': SetLastError,
+        'kernel32.TlsAlloc': TlsAlloc,
+        'kernel32.TlsGetValue': TlsGetValue,
+        'kernel32.TlsSetValue': TlsSetValue,
+        'kernel32.GetCurrentThreadId': GetCurrentThreadId,
+        'kernel32.CompareStringW': CompareStringW,
+        'kernel32.CompareStringA': CompareStringA,
+        'kernel32.GetFileAttributesA': GetFileAttributesA,
+        'ntdll._vsnprintf': vsnprintf,
+        'msvcr100.getenv_s': getenv_s,
+        'msvcr100.calloc': calloc,
+        'msvcr100.strncpy_s': strncpy_s,
+
+        }
+
 
 class win32const:
     FILE_ATTRIBUTE_ARCHIVE = 32 #(0x20) A file or directory that is an archive file or directory. Applications typically use this attribute to mark files for backup or removal .
@@ -919,126 +1161,7 @@ class LinuxKernel(dict):
             raise SystemCallNotImplemented(callnum, emu, op)
 
 
-#### posix function helpers
-def malloc(emu, op=None):
-    '''
-    emulator hook for malloc calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    size, = cconv.getCallArgs(emu, 1)
 
-    heap = getHeap(emu)
-    allocated_ptr = heap.malloc(size)
-    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
-
-    #cconv.setReturnValue(emu, allocated_ptr)
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
-
-def free(emu, op=None):
-    '''
-    emulator hook for free calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    va = cconv.getCallArgs(emu, 1)
-    print("FREE: 0x%x" % va)
-    cconv.setReturnValue(emu, 0)
-    cconv.deallocateCallSpace(emu, 0)
-
-def realloc(emu, op=None):
-    '''
-    emulator hook for realloc calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    existptr, size, = cconv.getCallArgs(emu, 2)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.realloc(existptr, size)
-
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
-
-def ret0(emu, op):
-    '''
-    emulator hook to just return 0
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 0)
-
-def ret1(emu, op):
-    '''
-    emulator hook to just return 1
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 1)
-
-def retneg1(emu, op):
-    '''
-    emulator hook to just return -1
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, -1)
-
-
-def syslog(emu, op=None):
-    '''
-    emulator hook for calls to syslog
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-
-    loglvl, strlength = cconv.getCallArgs(emu, 2)
-    string = readString(emu, strlength)
-    count = string.count('%')
-    neg2 = string.count('%%')
-    count -= (2*neg2)
-
-    args = cconv.getCallArgs(emu, count+2)[2:]
-    outstring = string % args
-    print("SYSLOG(%d): %s" % (loglvl, outstring))
-    for s in args:
-        if emu.isValidPointer(s):
-            print("\t" + readString(emu, s))
-    cconv.setReturnValue(emu, 0)
-    cconv.deallocateCallSpace(emu, 0)
-
-def nop(emu, op=None):
-    pass
-
-import_map = {
-        '*.syslog': syslog,
-        '*.malloc': malloc,
-        '*.free': free,
-        '*.realloc': realloc,
-        '*.strlen': strlen,
-        '*.strcmp': strcmp,
-        '*.strcat': strcat,
-        '*.strcpy': strcpy,
-        '*.strncpy': strncpy,
-        '*.memcpy': memcpy,
-        '*.memset': memset,
-        'kernel32.Sleep': Sleep,
-        'kernel32.HeapAlloc': HeapAlloc,
-        'kernel32.HeapFree': HeapFree,
-        'kernel32.HeapReAlloc': HeapReAlloc,
-        'kernel32.HeapDestroy': HeapDestroy,
-        'kernel32.HeapCreate': HeapCreate,     # malloc takes care of this
-        'kernel32.InitializeCriticalSection': InitializeCriticalSection,
-        'kernel32.EnterCriticalSection': EnterCriticalSection,
-        'kernel32.LeaveCriticalSection': LeaveCriticalSection,
-        'kernel32.GetLastError': GetLastError,
-        'kernel32.SetLastError': SetLastError,
-        'kernel32.TlsAlloc': TlsAlloc,
-        'kernel32.TlsGetValue': TlsGetValue,
-        'kernel32.TlsSetValue': TlsSetValue,
-        'kernel32.GetCurrentThreadId': GetCurrentThreadId,
-        'kernel32.CompareStringW': CompareStringW,
-        'kernel32.CompareStringA': CompareStringA,
-        'ntdll._vsnprintf': vsnprintf,
-        }
 
 def backTrace(emu):
     '''
@@ -1132,6 +1255,7 @@ class TestEmulator:
         self.vwg = None
 
         self.emu = emu
+        self.emu.temu = self    # i know i'm evil.
 
         if vw is not None:
             self.vw = emu.vw = vw
@@ -1146,12 +1270,22 @@ class TestEmulator:
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
+        self.environment = {}
+        self.fs = {}
+
         self.hookFuncs(importonly = not hookfuncsbyname)
 
         self.teb = None
         self.peb = None
         if fakePEB:
             self.initFakePEB()
+
+    def setFileInfo(self, filename, filebytes, fileattrib=0):
+        '''
+        Add/Replace Filesystem data
+        filedict is a dictionary of attributes/timestamps
+        '''
+        self.fs[filename] = (fileattrib, filebytes)
 
     def initFakePEB(self):
         '''
@@ -1750,6 +1884,11 @@ class TestEmulator:
                     for brva, brflags in op.getBranches(emu=emu):
                         if brflags & envi.BR_FALL:
                             continue
+
+                        taint = emu.getVivTaint(brva)
+                        if taint:
+                            taintval, tainttype, tainttuple = taint
+                            brva = tainttuple[0]
 
                         self.dbgprint("brva: 0x%x  brflags: 0x%x" % (brva, brflags))
                         handler = self.call_handlers.get(brva)
