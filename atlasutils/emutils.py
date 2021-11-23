@@ -155,30 +155,26 @@ def getLibcCallConv(emu):
 
 def memset(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, char, count = cconv.getCallArgs(emu, 3)
 
     data = ('%c' % char) * count
     emu.writeMemory(dest, data)
     print(data)
-    cconv.deallocateCallSpace(emu, 0, 0)
+    cconv.execCallReturn(emu, 0, 0)
     return data
 
 def memcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src, length = cconv.getCallArgs(emu, 3)
     data = emu.readMemory(src, length)
     emu.writeMemory(dest, data)
     print(data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
 
     return data
 
 def strncpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src, length = cconv.getCallArgs(emu, 3)
     data = emu.readMemory(src, length)
     nulloc = data.find(b'\0')
@@ -186,13 +182,11 @@ def strncpy(emu, op=None):
         data = data[:nulloc]
     emu.writeMemory(dest, data)
     print(data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
     return data
 
 def strncpy_s(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, destsz, src, length = cconv.getCallArgs(emu, 4)
     
     length = min(destsz, length)
@@ -208,59 +202,49 @@ def strncpy_s(emu, op=None):
 
     emu.writeMemory(dest, data)
     print(data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
     return data
 
 def strcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dest, src = cconv.getCallArgs(emu, 2)
     data = readString(emu, src) + b'\0'
     emu.writeMemory(dest, data)
     print(data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
     return data
 
 def strcat(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     start, second = cconv.getCallArgs(emu, 2)
     initial = readString(emu, start)
     data = readString(emu, second)
     emu.writeMemory(start + len(initial) + b'\0', data)
     print(initial+data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
     return initial+data
 
 def strncat(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     start, second, max2 = cconv.getCallArgs(emu, 3)
     initial = readString(emu, start)
     data = readString(emu, second)[:max2]
     
     emu.writeMemory(start + len(initial), data)
     print(initial+data)
-    cconv.setReturnValue(emu, dest)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, dest, 0)
     return initial+data
 
 def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    start = cconv.getCallArgs(emu, 1)
+    start, = cconv.getCallArgs(emu, 1)
     data = readString(emu, start)
     print(len(data))
-    cconv.setReturnValue(emu, len(data))
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, len(data), 0)
     return len(data)
 
 def strcmp(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     start1, start2 = cconv.getCallArgs(emu, 2)
     data1 = readString(emu, start1)
     data2 = readString(emu, start2)
@@ -282,8 +266,7 @@ def strcmp(emu, op=None):
     if failed:
         print("strcmp failed: %d" % retval)
 
-    cconv.setReturnValue(emu, retval)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, retval, 0)
     return retval
 
 
@@ -294,33 +277,6 @@ CHUNK_SIZE = 1 << 4
 CHUNK_NMASK = CHUNK_SIZE - 1
 CHUNK_MASK = ~CHUNK_NMASK
 
-def findNewMemoryMapSpace(emu, size, startingpoint=0x20000000):
-    print("findNewMemoryMapSpace: deprecated.  switch to MemoryObject.allocateMemory/findFreeMemoryBlock()")
-    baseva = None
-    while not baseva:
-        # if we roll into illegal memory, start over at page 2.  skip 0.
-        if startingpoint > (1<<(8*emu.psize)):
-            startingpoint = 0x1000
-
-        good = True
-        for x in range(size):
-            mmap = emu.getMemoryMap(startingpoint + x)
-            if mmap is None:
-                continue
-
-            else:
-                # we ran into a memory map.  adjust.
-                good=False
-                startingpoint = mmap[0] + mmap[1]
-                startingpoint += PAGE_NMASK
-                startingpoint &= PAGE_MASK
-                break
-
-        if good:
-            baseva = startingpoint
-
-    return baseva
-
 
 class EmuHeap:
     def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
@@ -329,37 +285,13 @@ class EmuHeap:
 
         mmap = '\0' * size
 
-        heapbase = self.findNewHeapBase(size, startingpoint)
-        if not emu.getMemoryMap(heapbase):
-            emu.addMemoryMap(heapbase, 6, 'heap_%x'%heapbase, b'\0'*size)
+        #heapbase = emu.findFreeMemoryBlock(size, startingpoint)
+        #if not emu.getMemoryMap(heapbase):
+        #    emu.addMemoryMap(heapbase, 6, 'heap_%x'%heapbase, b'\0'*size)
+        heapbase = emu.allocateMemory(size, 6, startingpoint, 'heap')    
         self.ptr = heapbase
         self.tracker = {}
-
-    def findNewHeapBase(self, size, startingpoint=0x20000000):
-        print("findNewHeapBase: deprecated.  switch to MemoryObject.allocateMemory/findFreeMemoryBlock()")
-        heapbase = None
-        while not heapbase:
-            # if we roll into illegal memory, start over at page 2.  skip 0.
-            if startingpoint > (1<<(8*self.emu.psize)):
-                startingpoint = 0x1000
-
-            good = True
-            for x in range(size):
-                mmap = self.emu.getMemoryMap(startingpoint + x)
-                if mmap is None:
-                    continue
-
-                # we ran into a memory map.  adjust.
-                good=False
-                startingpoint = mmap[0] + mmap[1]
-                startingpoint += PAGE_NMASK
-                startingpoint &= PAGE_MASK
-                break
-
-            if good:
-                heapbase = startingpoint
-    
-        return heapbase
+        self.freed = {}
 
     def malloc(self, size):
         size += CHUNK_NMASK
@@ -367,7 +299,7 @@ class EmuHeap:
         chunk = self.ptr
         self.ptr += size
 
-        self.tracker[chunk] = size
+        self.tracker[chunk] = (size, self.emu.getProgramCounter())
         return chunk
 
     def realloc(self, chunk, size):
@@ -381,14 +313,13 @@ class EmuHeap:
         return newchunk
 
     def free(self, addr):
-        # really?  nah.  not at this point.
-        pass
+        self.freed[addr] = self.emu.getProgramCounter()
 
     def dump(self):
         out = []
-        for baseva, size in list(self.tracker.items()):
+        for baseva, (size, allocpc) in list(self.tracker.items()):
             data = self.emu.readMemory(baseva, size)
-            out.append("[0x%x:0x%x]: %r" % (baseva, size, data.hex()))
+            out.append("[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc))
 
         return '\n'.join(out)
 
@@ -414,31 +345,25 @@ def getHeap(emu, initial_size=None):
 #### Win32 helper functions
 def Sleep(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     dwMS = cconv.getCallArgs(emu, 1)
     print("Sleep: dwMillisectonds: %d" % (dwMS))
     # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
     time.sleep(dwMS/1000)
-    cconv.setReturnValue(emu, 0)
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, 0, 1)
 
 def HeapCreate(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     opts, initsz, maxsz = cconv.getCallArgs(emu, 3)
     print("HeapCreate: flOptions: 0x%x dwInitialSize: 0x%x, dwMaxSize" % (opts, initsz, maxsz))
     # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
-    cconv.setReturnValue(emu, emu.setVivTaint('MSHeap', op.va))
-    cconv.deallocateCallSpace(emu, 3)
+    cconv.execCallReturn(emu, emu.setVivTaint('MSHeap', op.va), 3)
 
 def HeapDestroy(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     heapHandle = cconv.getCallArgs(emu, 1)
     print("HeapDestroy: 0x%x" % heapHandle)
     # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
-    cconv.setReturnValue(emu, heapHandle)
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, heapHandle, 1)
 
 def HeapAlloc(emu, op=None):
     '''
@@ -449,87 +374,68 @@ def HeapAlloc(emu, op=None):
     dwflags is ignored completely.
     '''
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     hheap, dwflags, size = cconv.getCallArgs(emu, 3)
 
     heap = getHeap(emu)
     allocated_ptr = heap.malloc(size)
     print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
-
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 3)   # ??  why am i *not* executingReturn?
+    cconv.execCallReturn(emu, allocated_ptr, 3)
 
 def HeapFree(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     hheap, dwflags, va = cconv.getCallArgs(emu, 3)
     print("FREE: 0x%x" % va)
-    cconv.setReturnValue(emu, va)
-    cconv.deallocateCallSpace(emu, 3)
+    cconv.execCallReturn(emu, va, 3)
 
 def HeapReAlloc(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     hheap, dwflags, existptr, size, = cconv.getCallArgs(emu, 4)
 
     heap = getHeap(emu)
     allocated_ptr = heap.realloc(existptr, size)
-
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 4)
+    cconv.execCallReturn(emu, allocated_ptr, 4)
 
 critical_sections = collections.defaultdict(list)
 def InitializeCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     lpCriticalSection, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalSection].append(op.va)
     # do absolutely nothing
-
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, 0, 0)
 
 def EnterCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalPointer].append(op.va)
     # do absolutely nothing
-
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, 0, 1)
 
 def LeaveCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalPointer].append(op.va)
     # do absolutely nothing
 
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, 0, 1)
 
 last_error = 0
 def GetLastError(emu, op=None):
     global last_error
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    cconv.setReturnValue(emu, last_error)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, last_error, 0)
 
 def SetLastError(emu, op=None):
     global last_error
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     last_error, = cconv.getCallArgs(emu, 1)
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, 0, 1)
 
 def GetCurrentThreadId(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-
-    cconv.setReturnValue(emu, 0x31337)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, 0x31337, 0)
 
 # TODO: wrap this into a TLS object and strap it into the emulator like we do with the Heap
 tls_idxs = []
@@ -563,15 +469,11 @@ def rtTlsSetValue(slot, data):
 def TlsAlloc(emu, op=None):
     # should we track this in the emulator?
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-
-    cconv.setReturnValue(emu, rtTlsAlloc())
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, rtTlsAlloc(), 0)
 
 def TlsGetValue(emu, op=None):
     global tls_data
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     slot, = cconv.getCallArgs(emu, 1)
 
     tlsval = rtTlsGetValue(slot)
@@ -581,49 +483,39 @@ def TlsGetValue(emu, op=None):
         tlsval = emu.setVivTaint('TlsGetValue::Slot at 0x%x' % op.va, slot)
         rtTlsSetValue(slot, tlsval)
 
-    cconv.setReturnValue(emu, tlsval)
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, tlsval, 1)
 
 def TlsSetValue(emu, op=None):
     global tls_data
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     slot, data = cconv.getCallArgs(emu, 2)
-
-    cconv.setReturnValue(emu, rtTlsSetValue(slot, data))
-    cconv.deallocateCallSpace(emu, 2)
+    cconv.execCallReturn(emu, rtTlsSetValue(slot, data), 2)
 
 
 def CompareStringEx(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     lpLocaleName, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2, lpVersionInfo, \
             lpRsrvd, lParam = cconv.getCallArgs(emu, 9)
     result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
             lpString2, cchCount2, lpVersionInfo, lpRsrvd, lParam, charsize=2)
 
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 9)
+    cconv.execCallReturn(emu, result, 9)
 
 def CompareStringW(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2 = cconv.getCallArgs(emu, 6)
     result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
             lpString2, cchCount2, 0,0,0, charsize=2)
 
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 6)
+    cconv.execCallReturn(emu, result, 6)
 
 def CompareStringA(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     Locale, dwCmpFlags, lpString1, cchCount1, lpString2, cchCount2 = cconv.getCallArgs(emu, 6)
     result = doWin32StringCompare(emu, op, Locale, dwCmpFlags, lpString1, cchCount1, \
             lpString2, cchCount2, 0,0,0, charsize=2)
 
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 6)
+    cconv.execCallReturn(emu, result, 6)
 
 CSTR_FAILURE = 0
 CSTR_LESS_THAN = 1
@@ -676,7 +568,6 @@ def vsnprintf(emu, op=None):
     '''
     stackDump(emu)
     ccname, cconv = getMSCallConv(emu, op.va, 'cdecl')
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     s, n, fmt, args = cconv.getCallArgs(emu, 4)
     outfmt = emu.readMemString(fmt)
 
@@ -707,8 +598,7 @@ def vsnprintf(emu, op=None):
     result = len(out)
 
     input("vsnprintf: %r" % out)
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 4)
+    cconv.execCallReturn(emu, result, 4)
     
 def getenv_s(emu, op=None):
     '''
@@ -716,12 +606,8 @@ def getenv_s(emu, op=None):
     Since we don't have any environment variables, 
     '''
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    '''    size_t *pReturnValue,
-           char* buffer,
-           size_t numberOfElements,
-           const char *varname'''
     pRetVal, buff, numElem, varnameptr = cconv.getCallArgs(emu, 4)
+
     # grab some fake Environment variable string...
     temu = emu.temu
     vw = temu.vw
@@ -759,8 +645,7 @@ def getenv_s(emu, op=None):
             emu.writeMemory(buff, val[:numElem])
         result = 0
 
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, result, 0)
 
 INVALID_FILE_ATTRIBUTES = -1
 def GetFileAttributesA(emu, op=None):
@@ -768,7 +653,6 @@ def GetFileAttributesA(emu, op=None):
     Return attributes of a file or directory.
     '''
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     lpFileName, = cconv.getCallArgs(emu, 1)
     filename = emu.readMemString(lpFileName).upper()
 
@@ -780,8 +664,7 @@ def GetFileAttributesA(emu, op=None):
         lstat, fdata = fsentry
         result = lstat
 
-    cconv.setReturnValue(emu, result)
-    cconv.deallocateCallSpace(emu, 1)
+    cconv.execCallReturn(emu, result, 1)
 
 
 
@@ -791,78 +674,69 @@ def malloc(emu, op=None):
     emulator hook for malloc calls
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     size, = cconv.getCallArgs(emu, 1)
 
     heap = getHeap(emu)
     allocated_ptr = heap.malloc(size)
     print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
 
-    #cconv.setReturnValue(emu, allocated_ptr)
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, allocated_ptr, 0)
 
 def calloc(emu, op=None):
     '''
     emulator hook for malloc calls
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     elements, size = cconv.getCallArgs(emu, 2)
 
     heap = getHeap(emu)
     allocated_ptr = heap.malloc(size * elements)
     print("calloc(0x%x, 0x%x)  => 0x%x" % (elements, size, allocated_ptr))
 
-    #cconv.setReturnValue(emu, allocated_ptr)
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, allocated_ptr, 0)
 
 def free(emu, op=None):
     '''
     emulator hook for free calls
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-    va = cconv.getCallArgs(emu, 1)
+    va, = cconv.getCallArgs(emu, 1)
+    heap = getHeap(emu)
+    heap.free(va)
     print("FREE: 0x%x" % va)
-    cconv.setReturnValue(emu, 0)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, 0, 0)
 
 def realloc(emu, op=None):
     '''
     emulator hook for realloc calls
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
     existptr, size, = cconv.getCallArgs(emu, 2)
 
     heap = getHeap(emu)
     allocated_ptr = heap.realloc(existptr, size)
-
-    cconv.setReturnValue(emu, allocated_ptr)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, allocated_ptr, 0)
 
 def ret0(emu, op):
     '''
     emulator hook to just return 0
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 0)
+    cconv.execCallReturn(emu, 0, 0)
 
 def ret1(emu, op):
     '''
     emulator hook to just return 1
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, 1)
+    cconv.execCallReturn(emu, 1, 0)
 
 def retneg1(emu, op):
     '''
     emulator hook to just return -1
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.setReturnValue(emu, -1)
+    cconv.execCallReturn(emu, -1, 0)
 
 
 def syslog(emu, op=None):
@@ -870,8 +744,6 @@ def syslog(emu, op=None):
     emulator hook for calls to syslog
     '''
     ccname, cconv = getLibcCallConv(emu)
-    cconv.allocateReturnAddress(emu)    # this assumes we've called
-
     loglvl, strlength = cconv.getCallArgs(emu, 2)
     string = readString(emu, strlength)
     count = string.count('%')
@@ -884,8 +756,7 @@ def syslog(emu, op=None):
     for s in args:
         if emu.isValidPointer(s):
             print("\t" + readString(emu, s))
-    cconv.setReturnValue(emu, 0)
-    cconv.deallocateCallSpace(emu, 0)
+    cconv.execCallReturn(emu, 0, 0)
 
 def nop(emu, op=None):
     pass
@@ -925,7 +796,7 @@ import_map = {
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
-
+        'msvcr100.free': free,
         }
 
 
@@ -1291,9 +1162,9 @@ class TestEmulator:
         '''
         This is currently i386 only
         '''
-        peb = findNewMemoryMapSpace(self.emu, PEBSZ, 0x7ffd3000)
+        peb = self.emu.findFreeMemoryBlock(PEBSZ, 0x7ffd3000)
         self.emu.addMemoryMap(peb, 6, 'FakePEB', b'\0'*PEBSZ)
-        teb = findNewMemoryMapSpace(self.emu, TEBSZ, 0x7ffdc000)
+        teb = self.emu.findFreeMemoryBlock(TEBSZ, 0x7ffdc000)
         self.emu.addMemoryMap(teb, 6, 'FakeTEB', b'\0'*TEBSZ)
 
         self.emu.writeMemoryPtr(teb+0x30, peb)
@@ -1312,7 +1183,11 @@ class TestEmulator:
             return
 
         for impva, impsz, imptype, impname in self.emu.vw.getImports():
+            fname, funcname = impname.split('.', 1)
             if impname in import_map:
+                self.call_handlers[impva] = import_map.get(impname)
+            elif "*." + funcname in import_map:
+                impname = "*." + funcname
                 self.call_handlers[impva] = import_map.get(impname)
 
         if importonly:
@@ -1548,6 +1423,7 @@ class TestEmulator:
         
         '''
         emu = self.emu
+        self._follow = follow
         self.op_handlers = {}   # for instructions like 'sysenter' which are not supported by the emu
 
         plat = emu.vw.getMeta('Platform')
@@ -1876,7 +1752,7 @@ class TestEmulator:
 
                 if moveon:
                     continue
-
+                '''
                 # handle Calls separately
                 if op.isCall() and not skipop:
                     self.dbgprint("Call...")
@@ -1900,7 +1776,7 @@ class TestEmulator:
                         handler(emu, op)
                         skipop = True
 
-                    elif follow and not skip and not skipop:
+                    elif self._follow and not skip and not skipop:
                         # use the emulator to execute the call
                         starteip = emu.getProgramCounter()
                         if hasattr(emu, 'emumon') and emu.emumon is not None:
@@ -1916,6 +1792,9 @@ class TestEmulator:
                         if hasattr(emu, 'curpath'):
                             vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
                         skip = True
+                '''
+                if op.isCall() or op.iflags & envi.IF_BRANCH:
+                    skip, skipop = self.handleBranch(op, skip, skipop)
 
                 # if not already emulated a call, execute the instruction here...
                 if not skip and not skipop:
@@ -1967,9 +1846,14 @@ class TestEmulator:
                 break
 
             except envi.SegmentationViolation:
-                import sys
-                sys.excepthook(*sys.exc_info())
-                break
+                pc = emu.getProgramCounter()
+                taint = emu.getVivTaint(pc)
+                if op.isCall() or op.iflags & envi.IF_BRANCH and taint:
+                    skip, skipop = self.handleBranch(op, skip, skipop)
+                else:
+                    import sys
+                    sys.excepthook(*sys.exc_info())
+                    break
 
             except:
                 import sys
@@ -1978,6 +1862,60 @@ class TestEmulator:
 
         self.printStats(i)
 
+    def handleBranch(self, op, skip, skipop):
+        '''
+        '''
+        emu = self.emu
+        handler = None
+        for brva, brflags in op.getBranches(emu=emu):
+            if brflags & envi.BR_FALL:
+                continue
+
+            if hasattr(emu, 'getVivTaint'):
+                taint = emu.getVivTaint(brva)
+                if taint:
+                    taintval, tainttype, tainttuple = taint
+                    brva = tainttuple[0]
+
+            self.dbgprint("brva: 0x%x  brflags: 0x%x" % (brva, brflags))
+            handler = self.call_handlers.get(brva)
+            if handler is not None:
+                break
+
+        self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
+        if handler is not None:
+            if op.isCall():
+                # apply return address. any supported arch callconv should
+                # get this right... so take the first one.
+                retva = op.va + len(op)
+                ccname, cconv = emu.getCallingConventions()[0]
+                cconv.allocateReturnAddress(emu)    # this assumes we've called
+                cconv.setReturnAddress(emu, retva)
+                print("setting return address to 0x%x" % retva)
+
+            handler(emu, op)
+            skip = True
+            if not op.isCall():
+                # this was a branch... our handlers are intended to handle calls.
+                import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+
+        elif self._follow and not skip and not skipop:
+            # use the emulator to execute the call
+            starteip = emu.getProgramCounter()
+            if hasattr(emu, 'emumon') and emu.emumon is not None:
+                emu.emumon.prehook(emu, op, starteip)
+
+            emu.executeOpcode(op)
+            endeip = emu.getProgramCounter()
+            if hasattr(emu, 'emumon') and emu.emumon is not None:
+                emu.emumon.posthook(emu, op, endeip)
+
+            self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
+            if hasattr(emu, 'curpath'):
+                vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
+            skip = True
+        return skip, skipop
 
     def dbgprint(self, *args, **kwargs):
         if self.verbose:
