@@ -235,6 +235,20 @@ def strncat(emu, op=None):
     cconv.execCallReturn(emu, dest, 0)
     return initial+data
 
+def strncat_s(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    start, destsz, second, max2 = cconv.getCallArgs(emu, 4)
+    initial = readString(emu, start)
+    data = readString(emu, second)[:max2]
+
+    initiallen = len(initial)
+    writelen = destsz - initiallen
+    
+    emu.writeMemory(start + initiallen, data[:writelen])
+    print(initial+data)
+    cconv.execCallReturn(emu, 0, 0)
+    return initial+data
+
 def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     start, = cconv.getCallArgs(emu, 1)
@@ -796,6 +810,7 @@ import_map = {
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
+        'msvcr100.strncat_s': strncat_s,
         'msvcr100.free': free,
         }
 
@@ -1897,7 +1912,7 @@ class TestEmulator:
             skip = True
             if not op.isCall():
                 # this was a branch... our handlers are intended to handle calls.
-                import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+                print("handleBranch(): have handler, but %r (at 0x%x) is not a call, may work fine, but may not." % (op, op.va))
 
 
         elif self._follow and not skip and not skipop:
