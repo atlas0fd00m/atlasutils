@@ -123,6 +123,8 @@ def compare(data1, data2):
 #######  replacement functions.  can set these in TestEmulator().call_handlers 
 #######  to execute these in python instead of the supporting library
 #######  can also be run from runStep() ui to execute the replacement function
+STRUNCATE = 80
+
 def getMSCallConv(emu, tva=None, wintel32pref='stdcall'):
     if hasattr(emu, 'vw') and emu.vw is not None:
         ccname = None
@@ -187,9 +189,9 @@ def strncpy(emu, op=None):
 
 def strncpy_s(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
-    dest, destsz, src, length = cconv.getCallArgs(emu, 4)
+    dest, destsz, src, lenarg = cconv.getCallArgs(emu, 4)
     
-    length = min(destsz, length)
+    length = min(destsz, lenarg)
     data = emu.readMemory(src, length)
 
     nulloc = data.find(b'\0')
@@ -199,10 +201,13 @@ def strncpy_s(emu, op=None):
     data += b'\0'
 
     # check to see if need to return an error??
+    retval = 0
+    if lenarg > length + 1:
+        retval = STRUNCATE
 
     emu.writeMemory(dest, data)
     print(data)
-    cconv.execCallReturn(emu, dest, 0)
+    cconv.execCallReturn(emu, retval, 0)
     return data
 
 def strcpy(emu, op=None):
@@ -248,6 +253,52 @@ def strncat_s(emu, op=None):
     print(initial+data)
     cconv.execCallReturn(emu, 0, 0)
     return initial+data
+
+def strtok_s(emu, op=None):
+    print("strtok_s()")
+    ccname, cconv = getLibcCallConv(emu)
+    strToken, strDelimit, pCtx = cconv.getCallArgs(emu, 3)
+    print("strtok_s(0x%x, 0x%x, 0x%x)" % (strToken, strDelimit, pCtx))
+
+    if strToken:
+        # this is the first calling for this string
+        start = strToken
+
+    else:
+        # this is a follow-on calling for this string
+        start = emu.readMemoryPtr(pCtx)
+
+    # do the normal stuff
+    initial = readString(emu, start)
+    initiallen = len(initial)
+
+    delims = readString(emu, strDelimit)
+    
+    off = 0
+    found = False
+    while off < initiallen:
+        # is mybyte in delims
+        mybyte = initial[off]
+        off += 1
+
+        if mybyte in delims:
+            found = True
+            break
+
+    if found:
+        emu.writeMemory(start + off-1, b'\0')
+
+    if initiallen:
+        emu.writeMemoryPtr(pCtx, start+off)
+        retval = start
+        print("strtok_s() %r  (%r) => %r" % (initial, delims, initial[:off]))
+
+    else:
+        retval = 0
+        print("strtok_s() -> end")
+
+    cconv.execCallReturn(emu, retval, 0)
+    return retval
 
 def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
@@ -415,15 +466,15 @@ def InitializeCriticalSection(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalSection, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalSection].append(op.va)
-    # do absolutely nothing
-    cconv.execCallReturn(emu, 0, 0)
+    # do absolutely nothing but clean up
+    cconv.execCallReturn(emu, 0, 1)
 
 def EnterCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalPointer].append(op.va)
-    # do absolutely nothing
+    # do absolutely nothing but clean up
     cconv.execCallReturn(emu, 0, 1)
 
 def LeaveCriticalSection(emu, op=None):
@@ -431,7 +482,7 @@ def LeaveCriticalSection(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
     critical_sections[lpCriticalPointer].append(op.va)
-    # do absolutely nothing
+    # do absolutely nothing but clean up
 
     cconv.execCallReturn(emu, 0, 1)
 
@@ -811,6 +862,7 @@ import_map = {
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
         'msvcr100.strncat_s': strncat_s,
+        'msvcr100.strtok_s': strtok_s,
         'msvcr100.free': free,
         }
 
