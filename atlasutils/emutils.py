@@ -18,6 +18,7 @@ import envi.archs.i386 as e_i386
 import envi.archs.amd64 as e_amd64
 
 import vivisect
+import vivisect.cli as viv_cli
 import visgraph.pathcore as vg_path
 from binascii import hexlify, unhexlify
 
@@ -300,6 +301,19 @@ def strtok_s(emu, op=None):
     cconv.execCallReturn(emu, retval, 0)
     return retval
 
+def strrchr(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cstr, char = cconv.getCallArgs(emu, 2)
+    initial = readString(emu, cstr)
+    idx = initial.rfind(char)
+    if idx == -1:
+        retval = 0
+    else:
+        retval = cstr + idx
+
+    cconv.execCallReturn(emu, retval, 0)
+    return retval
+
 def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     start, = cconv.getCallArgs(emu, 1)
@@ -486,21 +500,21 @@ def LeaveCriticalSection(emu, op=None):
 
     cconv.execCallReturn(emu, 0, 1)
 
-last_error = 0
 def GetLastError(emu, op=None):
-    global last_error
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.execCallReturn(emu, last_error, 0)
+    cconv.execCallReturn(emu, kernel.last_error, 0)
 
 def SetLastError(emu, op=None):
-    global last_error
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    last_error, = cconv.getCallArgs(emu, 1)
+    kernel.last_error, = cconv.getCallArgs(emu, 1)
     cconv.execCallReturn(emu, 0, 1)
 
 def GetCurrentThreadId(emu, op=None):
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.execCallReturn(emu, 0x31337, 0)
+    cconv.execCallReturn(emu, kernel.curthread, 0)
 
 # TODO: wrap this into a TLS object and strap it into the emulator like we do with the Heap
 tls_idxs = []
@@ -581,6 +595,82 @@ def CompareStringA(emu, op=None):
             lpString2, cchCount2, 0,0,0, charsize=2)
 
     cconv.execCallReturn(emu, result, 6)
+
+def LoadLibraryExA(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpLibFileName, hFile, dwFlags = cconv.getCallArgs(emu, 3)
+    libFileName = emu.readMemString(lpLibFileName)
+
+    # check through path(s)
+    result = 0
+    go = False
+    normfn = emu.vw.normFileName(libFileName.decode('utf-8'))
+    result = emu.vw.parseExpression(normfn)
+
+    while result is None:
+        try:
+            filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
+            if filepath == "None":
+                result = 0
+                break
+
+            print("Loading...")
+            normfn = emu.vw.loadFromFile(filepath)
+            go = True
+            print("Loaded")
+
+            # if we have it setup, run vw.analyze()
+            if emu.getMeta("AnalyzeLoadLibraryLoads", False):
+                print("Analyzing...")
+                emu.vw.analyze()
+
+            # merge the imported memory maps from the Workspace into the emu
+            print("Sync VW maps to EMU...")
+            syncEmuWithVw(emu.vw, emu)
+            print("Synced")
+            result = emu.vw.parseExpression(normfn)
+            print("Map loaded...")
+
+            break
+
+        except KeyboardInterrupt:
+            break
+
+        except Exception as e:
+            print(e)
+
+    cconv.execCallReturn(emu, result, 3)
+
+
+def GetProcAddress(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hModule, lpProcName = cconv.getCallArgs(emu, 2)
+
+    result = 0
+    if hModule and lpProcName:
+        libmap = emu.getMemoryMap(hModule)
+        libname = libmap[3]
+        ProcName = emu.readMemString(lpProcName).decode('utf-8')
+        fullname = "%s.%s" % (libname, ProcName)
+        result = emu.vw.parseExpression(fullname)
+
+    cconv.execCallReturn(emu, result, 2)
+
+
+def dupWorkspace(vw):
+    newvw = viv_cli.VivCli()
+    for evt, einfo in emu.vw._event_list:
+        newvw._fireEvent(evt, einfo)
+
+    return newvw
+
+def syncEmuWithVw(vw, emu):
+    for mmva, mmsz, mmperm, mmname in vw.getMemoryMaps():
+        if emu.isValidPointer(mmva):
+            continue
+
+        # not a valid pointer in the emu, add the map
+        emu.addMemoryMap(mmva, mmperm, mmname, vw.readMemory(mmva, mmsz))
 
 CSTR_FAILURE = 0
 CSTR_LESS_THAN = 1
@@ -731,6 +821,26 @@ def GetFileAttributesA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 1)
 
+def SetErrorMode(emu, op=None):
+    '''
+    Sets Error mode for the process
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lastmode = kernel.errormode
+    kernel.errormode, = cconv.getCallArgs(emu, 1)
+
+    cconv.execCallReturn(emu, lastmode, 1)
+
+def GetErrorMode(emu, op=None):
+    '''
+    Return attributes of a file or directory.
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+
+    cconv.execCallReturn(emu, kernel.errormode, 0)
+
 
 
 #### posix function helpers
@@ -857,12 +967,17 @@ import_map = {
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
         'kernel32.GetFileAttributesA': GetFileAttributesA,
+        'kernel32.SetErrorMode': SetErrorMode,
+        'kernel32.GetErrorMode': GetErrorMode,
+        'kernel32.LoadLibraryExA': LoadLibraryExA,  # this is the yucky one
+        'kernel32.GetProcAddress': GetProcAddress,  # tied to LoadLibrary
         'ntdll._vsnprintf': vsnprintf,
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
         'msvcr100.strncat_s': strncat_s,
         'msvcr100.strtok_s': strtok_s,
+        'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
         }
 
@@ -888,6 +1003,12 @@ class win32const:
     FILE_ATTRIBUTE_TEMPORARY = 256 #(0x100) A file that is being used for temporary storage. File systems avoid writing data back to mass storage if sufficient cache memory is available, because typically, an application deletes a temporary file after the handle is closed. In that scenario, the system can entirely avoid writing the data. Otherwise, the data is written after the handle is closed.
     FILE_ATTRIBUTE_VIRTUAL = 65536 #(0x10000) This value is reserved for system use.
 
+    # for ErrorMode
+    SEM_FAILCRITICALERRORS = 0x0001 # The system does not display the critical-error-handler message box. Instead, the system sends the error to the calling process.
+    SEM_NOALIGNMENTFAULTEXCEPT = 0x0004 # The system automatically fixes memory alignment faults and makes them invisible to the application. It does this for the calling process and any descendant processes. This feature is only supported by certain processor architectures. For more information, see SetErrorMode.
+    SEM_NOGPFAULTERRORBOX = 0x0002  # The system does not display the Windows Error Reporting dialog.
+    SEM_NOOPENFILEERRORBOX = 0x8000 # The system does not display a message box when it fails to find a file. Instead, the error is returned to the calling process.
+
 #### SYSENTER/SYSCALL helpers
 class SystemCallNotImplemented(Exception):
     def __init__(self, callnum, emu, op):
@@ -911,6 +1032,9 @@ class WinKernel(dict):
         self.win32k = None
         self.ntdll = None
         self.ntoskrnl = None
+        self.errormode = win32const.SEM_FAILCRITICALERRORS
+        self.curthread = 0x31337
+        self.last_error = 0
         try:
             self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
             self.ntdll = __import__(self.modbase + '.ntdll', {}, {}, 1)
@@ -1129,12 +1253,12 @@ def backTrace(emu):
                 if tmpva + len(op) == cur and op.isCall():
                     # this looks like a good call in our call stack
                     tgtfname = 'None'
-                    if self.vw:
-                        funcname = self.vw.getName(self.vw.getFunction(op.va))
+                    if emu.vw:
+                        funcname = emu.vw.getName(emu.vw.getFunction(op.va))
                         tgtvas = [bva for bva, bflags in op.getBranches(emu=emu) if not bflags & envi.BR_FALL]
-                        if len(tgtvas) and self.vw:
+                        if len(tgtvas) and emu.vw:
                             tgtva = tgtvas[0]
-                            tgtfname = self.vw.getName(tgtva)
+                            tgtfname = emu.vw.getName(tgtva)
 
                     print("%r   %r   0x%x -> %r" % (cmmname, funcname, op.va, tgtfname))
                 tmpva += 1
@@ -1178,9 +1302,9 @@ def heapDump(emu):
     print(heap.dump())
 
 class TestEmulator:
-    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookfuncsbyname=False):
+    def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookfuncsbyname=False, **kwargs):
         '''
-        Instiate a TestEmulator harness.  This holds and controls an emulator object.
+        Instantiate a TestEmulator harness.  This holds and controls an emulator object.
 
         emu -       an existing emulator
         vw -        VivWorkspace object to build an emulator from
@@ -1210,6 +1334,9 @@ class TestEmulator:
         self.call_handlers = {}
         self.environment = {}
         self.fs = {}
+
+        # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
+        self.extFilePath = ''
 
         self.hookFuncs(importonly = not hookfuncsbyname)
 
@@ -1495,12 +1622,13 @@ class TestEmulator:
 
         plat = emu.vw.getMeta('Platform')
         if plat.startswith('win'):
-            self.kernel = WinKernel(emu)
+            kernel = WinKernel(emu)
         #elif plat.startswith('linux') or plat:
         else:   # FIXME: need to make Elf identification better!!
-            self.kernel = LinuxKernel(emu)
+            kernel = LinuxKernel(emu)
 
-        self.op_handlers['sysenter'] = self.kernel.op_sysenter
+        emu.setMeta('kernel', kernel)
+        self.op_handlers['sysenter'] = kernel.op_sysenter
 
         mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
         self.mcanv = mcanv  # store it for later inspection
