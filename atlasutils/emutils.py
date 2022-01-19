@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import cmd
 import sys
 import time
@@ -23,6 +24,7 @@ import visgraph.pathcore as vg_path
 from binascii import hexlify, unhexlify
 
 from atlasutils.errno import *
+from envi.expression import ExpressionFail
 
 
 SNAP_NORM = 0
@@ -160,7 +162,7 @@ def memset(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     dest, char, count = cconv.getCallArgs(emu, 3)
 
-    data = ('%c' % char) * count
+    data = (b'%c' % char) * count
     emu.writeMemory(dest, data)
     print(data)
     cconv.execCallReturn(emu, 0, 0)
@@ -169,6 +171,16 @@ def memset(emu, op=None):
 def memcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     dest, src, length = cconv.getCallArgs(emu, 3)
+    data = emu.readMemory(src, length)
+    emu.writeMemory(dest, data)
+    print(data)
+    cconv.execCallReturn(emu, dest, 0)
+
+    return data
+
+def memcpy_s(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    dest, destlen, src, length = cconv.getCallArgs(emu, 4)
     data = emu.readMemory(src, length)
     emu.writeMemory(dest, data)
     print(data)
@@ -207,7 +219,7 @@ def strncpy_s(emu, op=None):
         retval = STRUNCATE
 
     emu.writeMemory(dest, data)
-    print(data)
+    print("strncpy_s(0x%x, %r)" % (dest, data))
     cconv.execCallReturn(emu, retval, 0)
     return data
 
@@ -216,7 +228,7 @@ def strcpy(emu, op=None):
     dest, src = cconv.getCallArgs(emu, 2)
     data = readString(emu, src) + b'\0'
     emu.writeMemory(dest, data)
-    print(data)
+    print("strncpy(0x%x, %r)" % (dest, data))
     cconv.execCallReturn(emu, dest, 0)
     return data
 
@@ -226,7 +238,7 @@ def strcat(emu, op=None):
     initial = readString(emu, start)
     data = readString(emu, second)
     emu.writeMemory(start + len(initial) + b'\0', data)
-    print(initial+data)
+    print("strcat(0x%x, 0x%x)  => %r + %r" % (start, second, initial, data))
     cconv.execCallReturn(emu, dest, 0)
     return initial+data
 
@@ -237,7 +249,7 @@ def strncat(emu, op=None):
     data = readString(emu, second)[:max2]
     
     emu.writeMemory(start + len(initial), data)
-    print(initial+data)
+    print("strncat(0x%x, 0x%x, 0x%x)  => %r + %r" % (start, second, max2, initial, data))
     cconv.execCallReturn(emu, dest, 0)
     return initial+data
 
@@ -251,7 +263,7 @@ def strncat_s(emu, op=None):
     writelen = destsz - initiallen
     
     emu.writeMemory(start + initiallen, data[:writelen])
-    print(initial+data)
+    print("strncat(0x%x, 0x%x, 0x%x, 0x%x)  => %r + %r" % (start, destsz, second, max2, initial, data))
     cconv.execCallReturn(emu, 0, 0)
     return initial+data
 
@@ -310,7 +322,8 @@ def strrchr(emu, op=None):
         retval = 0
     else:
         retval = cstr + idx
-
+    
+    print("strrchr(%r, %r)" % (initial, char))
     cconv.execCallReturn(emu, retval, 0)
     return retval
 
@@ -318,7 +331,7 @@ def strlen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     start, = cconv.getCallArgs(emu, 1)
     data = readString(emu, start)
-    print(len(data))
+    print("strlen(%r) => 0x%x" % (data, len(data)))
     cconv.execCallReturn(emu, len(data), 0)
     return len(data)
 
@@ -327,6 +340,7 @@ def strcmp(emu, op=None):
     start1, start2 = cconv.getCallArgs(emu, 2)
     data1 = readString(emu, start1)
     data2 = readString(emu, start2)
+    print("strcmp(%r, %r)" % (data1, data2))
     data1len = len(data1)
     data2len = len(data2)
     failed = False
@@ -347,6 +361,19 @@ def strcmp(emu, op=None):
 
     cconv.execCallReturn(emu, retval, 0)
     return retval
+
+def strdup(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    strSource, = cconv.getCallArgs(emu, 1)
+
+    string = emu.readMemString(strSource) + b'\0'
+    print("strdup(%r)" % (string))
+
+    heap = getHeap(emu)
+    dupe = heap.malloc(len(string))
+    emu.writeMemory(dupe, string)
+
+    cconv.execCallReturn(emu, dupe, 1)
 
 
 PAGE_SIZE = 1 << 12
@@ -386,7 +413,10 @@ class EmuHeap:
             return 0
 
         newchunk = self.malloc(size)
-        oldsize = self.tracker.get(chunk)
+        # FIXME: error here if not found....
+        oldsize, oldaccess = self.tracker.get(chunk)
+
+        print("realloc: old: 0x%x  new: 0x%x      oldsize: 0x%x   newsize: 0x%x" % (chunk, newchunk, oldsize, size))
         self.emu.writeMemory(newchunk, self.emu.readMemory(chunk, oldsize))
 
         return newchunk
@@ -472,6 +502,7 @@ def HeapReAlloc(emu, op=None):
 
     heap = getHeap(emu)
     allocated_ptr = heap.realloc(existptr, size)
+    print("HeapReAlloc(0x%x, 0x%x, 0x%x, 0x%x): 0x%x" % (hheap, dwflags, existptr, size, allocated_ptr))
     cconv.execCallReturn(emu, allocated_ptr, 4)
 
 critical_sections = collections.defaultdict(list)
@@ -479,7 +510,8 @@ def InitializeCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalSection, = cconv.getCallArgs(emu, 1)
-    critical_sections[lpCriticalSection].append(op.va)
+    print("InitializeCriticalSection(0x%x)" % (lpCriticalSection))
+    critical_sections[lpCriticalSection].append(('Init', op.va))
     # do absolutely nothing but clean up
     cconv.execCallReturn(emu, 0, 1)
 
@@ -487,7 +519,8 @@ def EnterCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
-    critical_sections[lpCriticalPointer].append(op.va)
+    print("EnterCriticalSection(0x%x)" % (lpCriticalPointer))
+    critical_sections[lpCriticalPointer].append(('Enter',op.va))
     # do absolutely nothing but clean up
     cconv.execCallReturn(emu, 0, 1)
 
@@ -495,10 +528,22 @@ def LeaveCriticalSection(emu, op=None):
     global critical_sections
     ccname, cconv = getMSCallConv(emu, op.va)
     lpCriticalPointer, = cconv.getCallArgs(emu, 1)
-    critical_sections[lpCriticalPointer].append(op.va)
+    print("LeaveCriticalSection(0x%x)" % (lpCriticalPointer))
+    critical_sections[lpCriticalPointer].append(('Leave', op.va))
     # do absolutely nothing but clean up
 
     cconv.execCallReturn(emu, 0, 1)
+
+def DeleteCriticalSection(emu, op=None):
+    global critical_sections
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpCriticalPointer, = cconv.getCallArgs(emu, 1)
+    print("DeleteCriticalSection(0x%x)" % (lpCriticalPointer))
+    critical_sections[lpCriticalPointer].append(('Delete', op.va))
+    # do absolutely nothing but clean up
+
+    cconv.execCallReturn(emu, 0, 1)
+
 
 def GetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
@@ -548,6 +593,7 @@ def rtTlsSetValue(slot, data):
 def TlsAlloc(emu, op=None):
     # should we track this in the emulator?
     ccname, cconv = getMSCallConv(emu, op.va)
+    print("TlsAlloc()")
     cconv.execCallReturn(emu, rtTlsAlloc(), 0)
 
 def TlsGetValue(emu, op=None):
@@ -568,6 +614,9 @@ def TlsSetValue(emu, op=None):
     global tls_data
     ccname, cconv = getMSCallConv(emu, op.va)
     slot, data = cconv.getCallArgs(emu, 2)
+
+
+    print("TlsSetValue(%d, %r):" % (slot, data))
     cconv.execCallReturn(emu, rtTlsSetValue(slot, data), 2)
 
 
@@ -596,42 +645,93 @@ def CompareStringA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 6)
 
+def findPath(filepath, libFileName, casein=False):
+    '''
+    helper function to dig through paths and find a file
+
+    filepath is a list of directories
+    libFileName is a filename we're looking for
+    casesensitive
+    '''
+    if casein:
+        libFileName = libFileName.upper()
+
+    for pathpart in filepath:
+        for fname in os.listdir(pathpart):
+            f = fname
+            if casein:
+                f = f.upper()
+
+            if f == libFileName:
+                return(os.sep.encode('utf-8').join([pathpart, fname]))
+
+
+def FreeLibrary(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hLibModule, = cconv.getCallArgs(emu, 1)
+    fname = emu.vw.getFileByVa(hLibModule)
+
+    print("FreeLibrary(0x%x)  (%r)" % (hLibModule, fname))
+    # Yeah, we don't *gotta* do nothin... and ain't *gonna* do nothin
+
+    cconv.execCallReturn(emu, hLibModule, 1)
+
+
 def LoadLibraryExA(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     lpLibFileName, hFile, dwFlags = cconv.getCallArgs(emu, 3)
     libFileName = emu.readMemString(lpLibFileName)
 
     # check through path(s)
-    result = 0
+    result = None
     go = False
-    normfn = emu.vw.normFileName(libFileName.decode('utf-8'))
-    result = emu.vw.parseExpression(normfn)
 
+    # slice off path information
+    if b'\\' in libFileName:
+        lparts = libFileName.split(b'\\')
+        libFileName = lparts[-1]
+    
+    # get the name as it would appear in Viv's memory maps:
+    normfn = emu.vw.normFileName(libFileName.decode('utf-8'))
+
+    # go until it's loaded or we tell it to bugger off.
     while result is None:
         try:
-            filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
-            if filepath == "None":
-                result = 0
-                break
-
-            print("Loading...")
-            normfn = emu.vw.loadFromFile(filepath)
-            go = True
-            print("Loaded")
-
-            # if we have it setup, run vw.analyze()
-            if emu.getMeta("AnalyzeLoadLibraryLoads", False):
-                print("Analyzing...")
-                emu.vw.analyze()
-
-            # merge the imported memory maps from the Workspace into the emu
-            print("Sync VW maps to EMU...")
-            syncEmuWithVw(emu.vw, emu)
-            print("Synced")
             result = emu.vw.parseExpression(normfn)
             print("Map loaded...")
 
             break
+
+        except ExpressionFail as e:
+            print(e)
+            # if we don't have it already loaded and resolvable in the workspace
+            # we must load it
+           
+            try:
+                # TODO: take a path and go hunting for the dll in the path
+                filepath = findPath(emu.temu.filepath, libFileName)
+                if not filepath:
+                    filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
+                    if filepath == "None":
+                        result = 0
+                        break
+
+                print("Loading...")
+                normfn = emu.vw.loadFromFile(filepath)
+                go = True
+                print("Loaded")
+
+                # if we have it setup, run vw.analyze()
+                if emu.getMeta("AnalyzeLoadLibraryLoads", False):
+                    print("Analyzing...")
+                    emu.vw.analyze()
+
+                # merge the imported memory maps from the Workspace into the emu
+                print("Sync VW maps to EMU...")
+                syncEmuWithVw(emu.vw, emu)
+                print("Synced")
+            except Exception as e:
+                print("Error while attempting to load %r:  %r" % (normfn, e))
 
         except KeyboardInterrupt:
             break
@@ -645,22 +745,140 @@ def LoadLibraryExA(emu, op=None):
 def GetProcAddress(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     hModule, lpProcName = cconv.getCallArgs(emu, 2)
+    print("GetProcAddress(0x%x, 0x%x)" % (hModule, lpProcName))
 
     result = 0
-    if hModule and lpProcName:
-        libmap = emu.getMemoryMap(hModule)
-        libname = libmap[3]
-        ProcName = emu.readMemString(lpProcName).decode('utf-8')
-        fullname = "%s.%s" % (libname, ProcName)
-        result = emu.vw.parseExpression(fullname)
+    try:
+        if hModule and lpProcName:
+            libmap = emu.getMemoryMap(hModule)
+            libname = libmap[3]
+            ProcName = emu.readMemString(lpProcName).decode('utf-8')
+            fullname = "%s.%s" % (libname, ProcName)
+            print("     ==> (%r)" % (fullname))
+            result = emu.vw.parseExpression(fullname)
+    except Exception as e:
+        print("Error: %r" % e)
 
     cconv.execCallReturn(emu, result, 2)
 
+
+def GetModuleFileNameA(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hModule, lpFilename, nSize = cconv.getCallArgs(emu, 3)
+
+    filename = emu.vw.getFileByVa(hModule).encode('utf-8')
+    filename += b'.dll'
+    print("GetModuleFileNameA(%r)" % filename)
+
+    ## do we want this?
+    #filepath = findPath(emu.temu.filepath, filename, casein=True)
+    #print("GetModuleFileNameA() -> %r" % filepath)
+
+    #### CHEAT!
+    filename = b"C:\\Windows\\System32\\" + filename
+
+    if len(filename) >= nSize:
+        filename = filename[:nSize-1]
+    filename += b'\0'    # warning: WinXP doesn't mandate the '\0'
+
+    emu.writeMemory(lpFilename, filename)
+    result = len(filename) -1   # don't include the terminating null
+
+    cconv.execCallReturn(emu, result, 3)
+
+def CreateMutexA(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpMutexAttributes, bInitialOwner, lpName = cconv.getCallArgs(emu, 3)
+    name = b''
+
+    # this is a rough skelleton for hacking purposes...
+    heap = getHeap(emu)
+    mutex = heap.malloc(16) # guess at some size
+
+    mutexes = emu.getMeta('Mutexes')
+    if mutexes is None:
+        mutexes = {}
+        emu.setMeta('Mutexes', mutexes)
+
+    if lpName:
+        name = emu.readMemString(lpName)
+
+    mutexes[mutex] = (name, bInitialOwner, lpMutexAttributes)
+    print("CreateMutexA: (0x%x, %r, 0x%x, 0x%x)" % (mutex, name, bInitialOwner, lpMutexAttributes))
+
+    cconv.execCallReturn(emu, mutex, 3)
+
+def ReleaseMutex(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hMutex, = cconv.getCallArgs(emu, 1)
+
+    # hack: assume current thread owns the mutex.  don't return errors
+    mutexes = emu.getMeta('Mutexes')
+    mutup = mutexes.get(hMutex)
+    print("ReleaseMutex(0x%x): %r" % (hMutex, mutup))
+
+    # for historical purposes, leave it alone
+
+    cconv.execCallReturn(emu, hMutex, 1)
+
+def WaitForSingleObject(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hHandle, dwMilliseconds = cconv.getCallArgs(emu, 2)
+
+    WAIT_ABANDONED = 0x00000080
+    WAIT_OBJECT_0 = 0x00000000
+    WAIT_TIMEOUT = 0x00000102
+    WAIT_FAILED = 0xFFFFFFFF
+
+    result = WAIT_OBJECT_0
+
+    cconv.execCallReturn(emu, result, 2)
+
+def CloseHandle(emu, op=None):
+    '''
+    per MSDN:
+    The CloseHandle function closes handles to the following objects:
+        Access token
+        Communications device
+        Console input
+        Console screen buffer
+        Event
+        File
+        File mapping
+        I/O completion port
+        Job
+        Mailslot
+        Memory resource notification
+        Mutex
+        Named pipe
+        Pipe
+        Process
+        Semaphore
+        Thread
+        Transaction
+        Waitable timer
+    '''
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hHandle, = cconv.getCallArgs(emu, 1)
+    emu.getMeta('CloseHandle', []).append((op.va, hHandle))
+    print("CloseHandle(0x%x)" % hHandle)
+
+    cconv.execCallReturn(emu, hHandle, 1)
 
 def dupWorkspace(vw):
     newvw = viv_cli.VivCli()
     for evt, einfo in emu.vw._event_list:
         newvw._fireEvent(evt, einfo)
+
+    for amod in vw.amods:
+        newvw.amods.append(amod)
+    for amodnm in vw.amodlist:
+        newvw.amodlist.append(amodnm)
+
+    for fmod in vw.fmods:
+        newvw.fmods.append(fmod)
+    for fmodnm in vw.fmodlist:
+        newvw.fmodlist.append(fmodnm)
 
     return newvw
 
@@ -886,7 +1104,7 @@ def realloc(emu, op=None):
     emulator hook for realloc calls
     '''
     ccname, cconv = getLibcCallConv(emu)
-    existptr, size, = cconv.getCallArgs(emu, 2)
+    existptr, size = cconv.getCallArgs(emu, 2)
 
     heap = getHeap(emu)
     allocated_ptr = heap.realloc(existptr, size)
@@ -947,7 +1165,10 @@ import_map = {
         '*.strcat': strcat,
         '*.strcpy': strcpy,
         '*.strncpy': strncpy,
+        '*._strdup': strdup,
+        '*.strdup': strdup,
         '*.memcpy': memcpy,
+        '*.memcpy_s': memcpy_s,
         '*.memset': memset,
         'kernel32.Sleep': Sleep,
         'kernel32.HeapAlloc': HeapAlloc,
@@ -958,6 +1179,7 @@ import_map = {
         'kernel32.InitializeCriticalSection': InitializeCriticalSection,
         'kernel32.EnterCriticalSection': EnterCriticalSection,
         'kernel32.LeaveCriticalSection': LeaveCriticalSection,
+        'kernel32.DeleteCriticalSection': DeleteCriticalSection,
         'kernel32.GetLastError': GetLastError,
         'kernel32.SetLastError': SetLastError,
         'kernel32.TlsAlloc': TlsAlloc,
@@ -969,8 +1191,14 @@ import_map = {
         'kernel32.GetFileAttributesA': GetFileAttributesA,
         'kernel32.SetErrorMode': SetErrorMode,
         'kernel32.GetErrorMode': GetErrorMode,
+        'kernel32.FreeLibrary': FreeLibrary,
         'kernel32.LoadLibraryExA': LoadLibraryExA,  # this is the yucky one
         'kernel32.GetProcAddress': GetProcAddress,  # tied to LoadLibrary
+        'kernel32.GetModuleFileNameA': GetModuleFileNameA,
+        'kernel32.CreateMutexA': CreateMutexA,
+        'kernel32.ReleaseMutex': ReleaseMutex,
+        'kernel32.WaitForSingleObject': WaitForSingleObject,
+        'kernel32.CloseHandle': CloseHandle,
         'ntdll._vsnprintf': vsnprintf,
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
@@ -979,6 +1207,7 @@ import_map = {
         'msvcr100.strtok_s': strtok_s,
         'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
+        'msvcr100._strdup': strdup,
         }
 
 
@@ -1312,6 +1541,8 @@ class TestEmulator:
         fakePEB -   set up fake PEB/TEB memoryspaces and setup the appropriate segment
         guiFuncGraphName - name of the gui window to send location info to (nav info)
         hookbyname - should we 
+        filepath -  path for finding binaries (for emufuncs like LoadLibraryExA), just 
+                    like current OS pathing.
         '''
         self.vw = None
         self.vwg = None
@@ -1334,6 +1565,7 @@ class TestEmulator:
         self.call_handlers = {}
         self.environment = {}
         self.fs = {}
+        self.filepath = kwargs.get('filepath', [])
 
         # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
         self.extFilePath = ''
@@ -2086,7 +2318,7 @@ class TestEmulator:
                 ccname, cconv = emu.getCallingConventions()[0]
                 cconv.allocateReturnAddress(emu)    # this assumes we've called
                 cconv.setReturnAddress(emu, retva)
-                print("setting return address to 0x%x" % retva)
+                print("\n%r:  setting return address to 0x%x" % (handler, retva))
 
             handler(emu, op)
             skip = True
