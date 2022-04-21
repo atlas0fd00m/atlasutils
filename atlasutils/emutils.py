@@ -656,10 +656,12 @@ def InterlockedCompareExchange(emu, op=None):
 
     cconv.execCallReturn(emu, destval, 3)
 
+
+
 def GetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.execCallReturn(emu, kernel.getLastError, 0)
+    cconv.execCallReturn(emu, kernel.getLastError(), 0)
 
 def SetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
@@ -845,75 +847,81 @@ def LoadLibraryExA(emu, op=None):
         lparts = libFileName.split(b'\\')
         libFileName = lparts[-1]
     
-    # get the name as it would appear in Viv's memory maps:
-    normfn = emu.vw.normFileName(libFileName.decode('utf-8'))
 
-    # go until it's loaded or we tell it to bugger off.
-    while result is None:
-        try:
-            result = emu.vw.parseExpression(normfn)
-            print("Map loaded...")
+    # we need to load our library, and each dependency library that isn't already loaded
+    todo = [libFileName]
+    while todo:
+        libFileName = todo.pop()
 
-            break
+        # get the name as it would appear in Viv's memory maps:
+        normfn = emu.vw.normFileName(libFileName.decode('utf-8'))
 
-        except ExpressionFail as e:
-            print(e)
-            # if we don't have it already loaded and resolvable in the workspace
-            # we must load it
-           
+        # go until it's loaded or we tell it to bugger off.
+        while result is None:
             try:
-                # TODO: take a path and go hunting for the dll in the path
-                filepath = findPath(emu.temu.filepath, libFileName)
-                if not filepath:
-                    filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
-                    if filepath == "None":
-                        result = 0
-                        break
+                result = emu.vw.parseExpression(normfn)
+                print("Map loaded...")
 
-                print("Loading...")
-                normfn = emu.vw.loadFromFile(filepath)
-                go = True
-                print("Loaded")
+                break
 
-                # if we have it setup, run vw.analyze()
-                if emu.getMeta("AnalyzeLoadLibraryLoads", False):
-                    print("Analyzing...")
-                    emu.vw.analyze()
+            except ExpressionFail as e:
+                print(e)
+                # if we don't have it already loaded and resolvable in the workspace
+                # we must load it
+           
+                try:
+                    # TODO: take a path and go hunting for the dll in the path
+                    filepath = findPath(emu.temu.filepath, libFileName)
+                    if not filepath:
+                        filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
+                        if filepath == "None":
+                            result = 0
+                            break
 
-                # merge the imported memory maps from the Workspace into the emu
-                print("Sync VW maps to EMU...")
-                syncEmuWithVw(emu.vw, emu)
-                print("Synced")
+                    print("Loading...")
+                    normfn = emu.vw.loadFromFile(filepath)
+                    go = True
+                    print("Loaded")
+
+                    # if we have it setup, run vw.analyze()
+                    if emu.getMeta("AnalyzeLoadLibraryLoads", False):
+                        print("Analyzing...")
+                        emu.vw.analyze()
+
+                    # merge the imported memory maps from the Workspace into the emu
+                    print("Sync VW maps to EMU...")
+                    syncEmuWithVw(emu.vw, emu)
+                    print("Synced")
+                except Exception as e:
+                    print("Error while attempting to load %r:  %r" % (normfn, e))
+
+            except KeyboardInterrupt:
+                break
+
             except Exception as e:
-                print("Error while attempting to load %r:  %r" % (normfn, e))
+                print(e)
 
-        except KeyboardInterrupt:
-            break
+        # run Library Init routine (__entry)
+        ret = emu.readMemoryPtr(emu.getStackCounter())
+        init = emu.vw.parseExpression(normfn + ".__entry")
 
-        except Exception as e:
-            print(e)
+        if init:
+            print("RUNNING LIBRARY INITIALIZER")
+            ccname, cconv = getMSCallConv(emu, init)
+            cconv.allocateCallSpace(emu, 3)
+            # set RET to 0x8831337
+            ret = emu.writeMemoryPtr(emu.getStackCounter(), 0x8831337)
 
-    # run Library Init routine (__entry)
-    ret = emu.readMemoryPtr(emu.getStackCounter())
-    init = emu.vw.parseExpression(normfn + ".__entry")
+            instance = result
+            reason = DLL_PROCESS_ATTACH  # initialize
+            reserved = 0
+            cconv.setCallArgs(emu, [instance, reason, reserved])
+    
+            emu.setProgramCounter(init)
+            emu.temu.runStep(pause=False, runTil=0x8831337)
 
-    if init:
-        print("RUNNING LIBRARY INITIALIZER")
-        ccname, cconv = getMSCallConv(emu, init)
-        cconv.allocateCallSpace(emu, 3)
-        # set RET to 0x8831337
-        ret = emu.writeMemoryPtr(emu.getStackCounter(), 0x8831337)
-
-        instance = result
-        reason = DLL_PROCESS_ATTACH  # initialize
-        reserved = 0
-        cconv.setCallArgs(emu, [instance, reason, reserved])
-
-        emu.setProgramCounter(init)
-        emu.temu.runStep(pause=False, runTil=0x8831337)
-
-    else:
-        print("No Library Init found, just returning")
+        else:
+            print("No Library Init found, just returning")
 
     import envi.interactive as ei; ei.dbg_interact(locals(), globals())
     cconv.execCallReturn(emu, result, 3)
