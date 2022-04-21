@@ -952,26 +952,40 @@ def GetProcAddress(emu, op=None):
 
 
 def GetModuleFileNameA(emu, op=None):
+    '''
+    kernel32.GetModuleFileNameA
+    '''
     ccname, cconv = getMSCallConv(emu, op.va)
     hModule, lpFilename, nSize = cconv.getCallArgs(emu, 3)
+    print("GetModuleFilenameA(0x%x, 0x%x, 0x%x)" % (hModule, lpFilename, nSize))
 
-    filename = emu.vw.getFileByVa(hModule).encode('utf-8')
-    filename += b'.dll'
-    print("GetModuleFileNameA(%r)" % filename)
+    if hModule:
+        curname = emu.vw.getFileByVa(hModule)
+        curname += '.dll'
+    else:
+        curname = "Filename.exe"
+    print("GetModuleFileNameA(%r)" % curname)
 
     ## do we want this?
-    #filepath = findPath(emu.temu.filepath, filename, casein=True)
-    #print("GetModuleFileNameA() -> %r" % filepath)
+    filepath = findPath(emu.temu.filepath, curname, casein=True)
+    print("GetModuleFileNameA() -> %r" % filepath)
 
-    #### CHEAT!
-    filename = b"C:\\Windows\\System32\\" + filename
+    if not filepath:
+        uinp = input("  (%r):" % curname)
+        if len(uinp):
+            curname = uinp
 
-    if len(filename) >= nSize:
-        filename = filename[:nSize-1]
-    filename += b'\0'    # warning: WinXP doesn't mandate the '\0'
+    retname = curname.encode('utf-8')
+    
+    if retname[-1] != b'\0':
+        retname += b'\0'
 
-    emu.writeMemory(lpFilename, filename)
-    result = len(filename) -1   # don't include the terminating null
+    if len(retname) > nSize:
+        retname = retname[:nSize-1] + b'\0' # WinXP: not NULL terminated if too big
+
+    result = len(retname.replace(b'\0', b'')) # len without NULL
+
+    emu.writeMemory(lpFilename, retname)
 
     cconv.execCallReturn(emu, result, 3)
 
@@ -982,43 +996,57 @@ def CreateMutexA(emu, op=None):
 
     # this is a rough skelleton for hacking purposes...
     heap = getHeap(emu)
-    mutex = heap.malloc(16) # guess at some size
-
-    mutexes = emu.getMeta('Mutexes')
-    if mutexes is None:
-        mutexes = {}
-        emu.setMeta('Mutexes', mutexes)
+    newmutex = heap.malloc(32) # guess at some size
 
     if lpName:
         name = emu.readMemString(lpName)
 
-    mutexes[mutex] = (name, bInitialOwner, lpMutexAttributes)
+    kernel = emu.getMeta('kernel')
+    kernel.mutexes[newmutex] = (op.va, lpMutexAttributes, bInitialOwner, name)
     print("CreateMutexA: (0x%x, %r, 0x%x, 0x%x)" % (mutex, name, bInitialOwner, lpMutexAttributes))
+    emu.writeMemory(newmutex, b"Mutex: %r" % name)
 
-    cconv.execCallReturn(emu, mutex, 3)
+    cconv.execCallReturn(emu, newmutex, 3)
 
 def ReleaseMutex(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     hMutex, = cconv.getCallArgs(emu, 1)
 
-    # hack: assume current thread owns the mutex.  don't return errors
-    mutexes = emu.getMeta('Mutexes')
-    mutup = mutexes.get(hMutex)
-    print("ReleaseMutex(0x%x): %r" % (hMutex, mutup))
+    kernel = emu.getMeta('kernel')
+    mutup = kernel.mutexes.get(hMutex)
 
-    # for historical purposes, leave it alone
+    if mutup is None:
+        #do some error thing here
+        print("FAILED (MutexNotFoundInKernel)   ReleaseMutex(0x%x)" % hMutex)
+    else:
+        op.va, lpMutexAttributes, bInitialOwner, lpName = mutup
+        mutdata = emu.readMemory(hMutex, 32)
+        mutdata = mutdata[:-10] + b"Released\0\0"
 
-    cconv.execCallReturn(emu, hMutex, 1)
+        emu.writeMemory(hMutex, mutdata)
+        print("ReleaseMutex(0x%x)" % hMutex)
 
+    cconv.execCallReturn(emu, 0, 1)
+
+
+
+
+WAIT_ABANDONED = 0x00000080
+WAIT_OBJECT_0 = 0x00000000
+WAIT_TIMEOUT = 0x00000102
+WAIT_FAILED = 0xFFFFFFFF
 def WaitForSingleObject(emu, op=None):
+    '''
+    This could be much more...
+    '''
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    hHandle, dwMilliseconds = cconv.getCallArgs(emu, 2)
+    hHandle, dwMillis = cconv.getCallArgs(emu, 2)
 
-    WAIT_ABANDONED = 0x00000080
-    WAIT_OBJECT_0 = 0x00000000
-    WAIT_TIMEOUT = 0x00000102
-    WAIT_FAILED = 0xFFFFFFFF
-
+    objbytes = emu.readMemory(hHandle, 32)        # FIXME: make this more meaningful
+    print("WaitForSingleObject(0x%x, %d)  => %r" % (hHandle, dwMillis, objbytes))
+    input()
+    
     result = WAIT_OBJECT_0
 
     cconv.execCallReturn(emu, result, 2)
@@ -1365,15 +1393,18 @@ class WinKernel(dict):
         self.ntoskrnl = None
         self.errormode = win32const.SEM_FAILCRITICALERRORS
         self.last_error = 0
+        self.mutexes = {}
 
         try:
             self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
             self.ntdll = __import__(self.modbase + '.ntdll', {}, {}, 1)
             self.ntoskrnl = __import__(self.modbase + '.ntoskrnl', {}, {}, 1)
 
-            self.teb = self.ntdll.TEB()
-            self.peb = self.ntdll.PEB()
-            self.initFakePEB(arch=arch)
+            # if we don't have PEB and TEBs as emulator metadata 
+            if emu.getMeta('PEB') is None:
+                self.teb = self.ntdll.TEB()
+                self.peb = self.ntdll.PEB()
+                self.initFakePEB(vermaj=vermaj, vermin=vermin, arch=arch)
 
         except ImportError as e:
             print("error importing VStructs for Windows %d.%d_%s: %r" % (vermaj, vermin, arch, e))
@@ -1791,6 +1822,7 @@ class TestEmulator:
 
         # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
         self.extFilePath = ''
+        self.nonstop = 0
 
         self.hookFuncs(importonly = not hookfuncsbyname)
 
@@ -2077,7 +2109,7 @@ class TestEmulator:
             print("tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) == int])))
 
 
-        nonstop = 0
+        self.nonstop = 0
         tova = None
         quit = False
         moveon = False
@@ -2159,16 +2191,16 @@ class TestEmulator:
                     print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "
 
-                    # nonstop controls whether we stop.  tova indicates we're hunting for a va, otherwise 
-                    # treat nonstop as a negative-counter
+                    # self.nonstop controls whether we stop.  tova indicates we're hunting for a va, otherwise 
+                    # treat self.nonstop as a negative-counter
                     if tova is not None:
                         if pc == tova:
-                            nonstop = 0
+                            self.nonstop = 0
 
-                    elif nonstop:
-                        nonstop -= 1
+                    elif self.nonstop:
+                        self.nonstop -= 1
 
-                    if not (emuBranch or nonstop) and pause:
+                    if not (emuBranch or self.nonstop) and pause:
                         tova = None
                         nextva = op.va + len(op)
                         moveon = False
@@ -2203,15 +2235,15 @@ class TestEmulator:
                                     args = uinp.split(' ')
 
                                     if args[-1].startswith('+'):
-                                        nonstop = parseExpression(emu, args[-1], {'next': nextva})
+                                        self.nonstop = parseExpression(emu, args[-1], {'next': nextva})
                                     else:
                                         tova = parseExpression(emu, args[-1], {'next': nextva})
-                                        nonstop = 1
+                                        self.nonstop = 1
                                     break
 
                                 elif uinp == 'ni':
                                     # next instruction (eg. skip over a call)
-                                    nonstop = 1
+                                    self.nonstop = 1
                                     tova = nextva
                                     break
 
@@ -2415,7 +2447,7 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 self.printStats(i)
-                nonstop = 0
+                self.nonstop = 0
                 pause = True
                 break
 
@@ -2430,7 +2462,7 @@ class TestEmulator:
                     break
 
             except:
-                nonstop = 0
+                self.nonstop = 0
                 pause = True
                 import sys
                 sys.excepthook(*sys.exc_info())
