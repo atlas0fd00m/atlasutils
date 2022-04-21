@@ -3,6 +3,7 @@ import os
 import cmd
 import sys
 import time
+import psutil
 import struct
 import struct
 import vtrace
@@ -123,11 +124,89 @@ def compare(data1, data2):
     print(''.join(out2))
 
 
+# our hacky HEAP implementation (good for RE, not for heap-exploitation context)
+PAGE_SIZE = 1 << 12
+PAGE_NMASK = PAGE_SIZE - 1
+PAGE_MASK = ~PAGE_NMASK
+CHUNK_SIZE = 1 << 4
+CHUNK_NMASK = CHUNK_SIZE - 1
+CHUNK_MASK = ~CHUNK_NMASK
+
+
+class EmuHeap:
+    def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
+        self.emu = emu
+        self.size = size
+
+        mmap = '\0' * size
+
+        #heapbase = emu.findFreeMemoryBlock(size, startingpoint)
+        #if not emu.getMemoryMap(heapbase):
+        #    emu.addMemoryMap(heapbase, 6, 'heap_%x'%heapbase, b'\0'*size)
+        heapbase = emu.allocateMemory(size, 6, startingpoint, 'heap')    
+        self.ptr = heapbase
+        self.tracker = {}
+        self.freed = {}
+
+    def malloc(self, size):
+        size += CHUNK_NMASK
+        size &= CHUNK_MASK
+        chunk = self.ptr
+        self.ptr += size
+
+        self.tracker[chunk] = (size, self.emu.getProgramCounter())
+        return chunk
+
+    def realloc(self, chunk, size):
+        if chunk not in self.tracker:
+            return 0
+
+        newchunk = self.malloc(size)
+        # FIXME: error here if not found....
+        oldsize, oldaccess = self.tracker.get(chunk)
+
+        print("realloc: old: 0x%x  new: 0x%x      oldsize: 0x%x   newsize: 0x%x" % (chunk, newchunk, oldsize, size))
+        self.emu.writeMemory(newchunk, self.emu.readMemory(chunk, oldsize))
+
+        return newchunk
+
+    def free(self, addr):
+        self.freed[addr] = self.emu.getProgramCounter()
+
+    def dump(self):
+        out = []
+        for baseva, (size, allocpc) in list(self.tracker.items()):
+            data = self.emu.readMemory(baseva, size)
+            out.append("[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc))
+
+        return '\n'.join(out)
+
+
+def getHeap(emu, initial_size=None):
+    '''
+    Returns a Heap Object.
+    If one is not currently created in the emu (stored in emu metadata)
+    one is created.  If initial_size is not None, that value is used,
+    otherwise the default is used.
+    '''
+    heap = emu.getMeta('Heap')
+    if heap is None:
+        if initial_size is not None:
+            heap = EmuHeap(emu, initial_size)
+        else:
+            heap = EmuHeap(emu)
+        emu.setMeta('Heap', heap)
+
+    return heap
+
+
 #######  replacement functions.  can set these in TestEmulator().call_handlers 
 #######  to execute these in python instead of the supporting library
 #######  can also be run from runStep() ui to execute the replacement function
 STRUNCATE = 80
 
+
+#### Calling Convention helpers:
 def getMSCallConv(emu, tva=None, wintel32pref='stdcall'):
     if hasattr(emu, 'vw') and emu.vw is not None:
         ccname = None
@@ -157,6 +236,100 @@ def getLibcCallConv(emu):
         return ccname, cconv
 
     return emu.getCallingConventions()[0]
+
+
+#### posix function helpers
+def malloc(emu, op=None):
+    '''
+    emulator hook for malloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    size, = cconv.getCallArgs(emu, 1)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size)
+    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
+
+    cconv.execCallReturn(emu, allocated_ptr, 0)
+
+def calloc(emu, op=None):
+    '''
+    emulator hook for malloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    elements, size = cconv.getCallArgs(emu, 2)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.malloc(size * elements)
+    print("calloc(0x%x, 0x%x)  => 0x%x" % (elements, size, allocated_ptr))
+
+    cconv.execCallReturn(emu, allocated_ptr, 0)
+
+def free(emu, op=None):
+    '''
+    emulator hook for free calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    va, = cconv.getCallArgs(emu, 1)
+    heap = getHeap(emu)
+    heap.free(va)
+    print("FREE: 0x%x" % va)
+    cconv.execCallReturn(emu, 0, 0)
+
+def realloc(emu, op=None):
+    '''
+    emulator hook for realloc calls
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    existptr, size = cconv.getCallArgs(emu, 2)
+
+    heap = getHeap(emu)
+    allocated_ptr = heap.realloc(existptr, size)
+    cconv.execCallReturn(emu, allocated_ptr, 0)
+
+def ret0(emu, op):
+    '''
+    emulator hook to just return 0
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.execCallReturn(emu, 0, 0)
+
+def ret1(emu, op):
+    '''
+    emulator hook to just return 1
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.execCallReturn(emu, 1, 0)
+
+def retneg1(emu, op):
+    '''
+    emulator hook to just return -1
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    cconv.execCallReturn(emu, -1, 0)
+
+
+def syslog(emu, op=None):
+    '''
+    emulator hook for calls to syslog
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    loglvl, strlength = cconv.getCallArgs(emu, 2)
+    string = readString(emu, strlength)
+    count = string.count(b'%')
+    neg2 = string.count(b'%%')
+    count -= (2*neg2)
+
+    args = cconv.getCallArgs(emu, count+2)[2:]
+    outstring = string % args
+    print("SYSLOG(%d): %s" % (loglvl, outstring))
+    for s in args:
+        if emu.isValidPointer(s):
+            print("\t" + readString(emu, s))
+    cconv.execCallReturn(emu, 0, 0)
+
+def nop(emu, op=None):
+    pass
 
 def memset(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
@@ -376,85 +549,10 @@ def strdup(emu, op=None):
     cconv.execCallReturn(emu, dupe, 1)
 
 
-PAGE_SIZE = 1 << 12
-PAGE_NMASK = PAGE_SIZE - 1
-PAGE_MASK = ~PAGE_NMASK
-CHUNK_SIZE = 1 << 4
-CHUNK_NMASK = CHUNK_SIZE - 1
-CHUNK_MASK = ~CHUNK_NMASK
-
-
-class EmuHeap:
-    def __init__(self, emu, size=10*1024, startingpoint=0x20000000):
-        self.emu = emu
-        self.size = size
-
-        mmap = '\0' * size
-
-        #heapbase = emu.findFreeMemoryBlock(size, startingpoint)
-        #if not emu.getMemoryMap(heapbase):
-        #    emu.addMemoryMap(heapbase, 6, 'heap_%x'%heapbase, b'\0'*size)
-        heapbase = emu.allocateMemory(size, 6, startingpoint, 'heap')    
-        self.ptr = heapbase
-        self.tracker = {}
-        self.freed = {}
-
-    def malloc(self, size):
-        size += CHUNK_NMASK
-        size &= CHUNK_MASK
-        chunk = self.ptr
-        self.ptr += size
-
-        self.tracker[chunk] = (size, self.emu.getProgramCounter())
-        return chunk
-
-    def realloc(self, chunk, size):
-        if chunk not in self.tracker:
-            return 0
-
-        newchunk = self.malloc(size)
-        # FIXME: error here if not found....
-        oldsize, oldaccess = self.tracker.get(chunk)
-
-        print("realloc: old: 0x%x  new: 0x%x      oldsize: 0x%x   newsize: 0x%x" % (chunk, newchunk, oldsize, size))
-        self.emu.writeMemory(newchunk, self.emu.readMemory(chunk, oldsize))
-
-        return newchunk
-
-    def free(self, addr):
-        self.freed[addr] = self.emu.getProgramCounter()
-
-    def dump(self):
-        out = []
-        for baseva, (size, allocpc) in list(self.tracker.items()):
-            data = self.emu.readMemory(baseva, size)
-            out.append("[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc))
-
-        return '\n'.join(out)
-
-
-def getHeap(emu, initial_size=None):
-    '''
-    Returns a Heap Object.
-    If one is not currently created in the emu (stored in emu metadata)
-    one is created.  If initial_size is not None, that value is used,
-    otherwise the default is used.
-    '''
-    heap = emu.getMeta('Heap')
-    if heap is None:
-        if initial_size is not None:
-            heap = EmuHeap(emu, initial_size)
-        else:
-            heap = EmuHeap(emu)
-        emu.setMeta('Heap', heap)
-
-    return heap
-
-
 #### Win32 helper functions
 def Sleep(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
-    dwMS = cconv.getCallArgs(emu, 1)
+    dwMS, = cconv.getCallArgs(emu, 1)
     print("Sleep: dwMillisectonds: %d" % (dwMS))
     # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
     time.sleep(dwMS/1000)
@@ -544,22 +642,78 @@ def DeleteCriticalSection(emu, op=None):
 
     cconv.execCallReturn(emu, 0, 1)
 
+def InterlockedCompareExchange(emu, op=None):
+    import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
+    ccname, cconv = getMSCallConv(emu, op.va)
+    Destination, ExChange, Comperand = cconv.getCallArgs(emu, 3)
+    destval = emu.readMemValue(Destination, 4)
+    xchgval = emu.readMemValue(ExChange, 4)
+    cmpval  = emu.readMemValue(Comperand, 4)
+
+    if destval == cmpval:
+        emu.writeMemValue(Destination, xchgval, 4)
+
+    cconv.execCallReturn(emu, destval, 3)
 
 def GetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.execCallReturn(emu, kernel.last_error, 0)
+    cconv.execCallReturn(emu, kernel.getLastError, 0)
 
 def SetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    kernel.last_error, = cconv.getCallArgs(emu, 1)
+    last_error, = cconv.getCallArgs(emu, 1)
+    kernel.setLastError(last_error)
     cconv.execCallReturn(emu, 0, 1)
 
 def GetCurrentThreadId(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    cconv.execCallReturn(emu, kernel.curthread, 0)
+    print("GetCurrentThreadId()")
+    cconv.execCallReturn(emu, kernel.getCurThread(), 0)
+
+def GetCurrentProcessId(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    print("GetCurrentProcessId()")
+    cconv.execCallReturn(emu, kernel.getCurPid(), 0)
+
+def GetTickCount(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    tickcount = kernel.GetTickCount()
+    print("GetTickCount()")
+    cconv.execCallReturn(emu, tickcount, 0)
+
+def GetSystemTimeAsFileTime(emu, op=None):
+    '''
+    Returns a pointer to a FILETIME structure which...
+    Contains a 64-bit value representing the number of 100-nanosecond intervals since January 1, 1601 (UTC).
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpSystemTimeAsFileTime, = cconv.getCallArgs(emu, 1)
+    print("GetSystemTimeAsFileTime(0x%x)" % lpSystemTimeAsFileTime)
+
+    winktime = kernel.GetSystemTimeAsFileTime()
+    emu.writeMemoryFormat(lpSystemTimeAsFileTime, '<Q', winktime)
+
+    cconv.execCallReturn(emu, 0, 1)
+
+
+def QueryPerformanceCounter(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpPerformanceCount, = cconv.getCallArgs(emu, 1)
+    print("QueryPerformanceCounter(0x%x)" % lpPerformanceCount)
+    perfcnt = kernel.QueryPerformanceCounter()
+    emu.writeMemoryFormat(lpPerformanceCount, '<Q', perfcnt)
+
+    cconv.execCallReturn(emu, 123, 1)   # non-zero on success
+
+
 
 # TODO: wrap this into a TLS object and strap it into the emulator like we do with the Heap
 tls_idxs = []
@@ -739,8 +893,35 @@ def LoadLibraryExA(emu, op=None):
         except Exception as e:
             print(e)
 
+    # run Library Init routine (__entry)
+    ret = emu.readMemoryPtr(emu.getStackCounter())
+    init = emu.vw.parseExpression(normfn + ".__entry")
+
+    if init:
+        print("RUNNING LIBRARY INITIALIZER")
+        ccname, cconv = getMSCallConv(emu, init)
+        cconv.allocateCallSpace(emu, 3)
+        # set RET to 0x8831337
+        ret = emu.writeMemoryPtr(emu.getStackCounter(), 0x8831337)
+
+        instance = result
+        reason = DLL_PROCESS_ATTACH  # initialize
+        reserved = 0
+        cconv.setCallArgs(emu, [instance, reason, reserved])
+
+        emu.setProgramCounter(init)
+        emu.temu.runStep(pause=False, runTil=0x8831337)
+
+    else:
+        print("No Library Init found, just returning")
+
+    import envi.interactive as ei; ei.dbg_interact(locals(), globals())
     cconv.execCallReturn(emu, result, 3)
 
+DLL_PROCESS_DETACH = 0
+DLL_PROCESS_ATTACH = 1
+DLL_THREAD_ATTACH = 2
+DLL_THREAD_DETACH = 3
 
 def GetProcAddress(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -864,6 +1045,7 @@ def CloseHandle(emu, op=None):
     print("CloseHandle(0x%x)" % hHandle)
 
     cconv.execCallReturn(emu, hHandle, 1)
+
 
 def dupWorkspace(vw):
     newvw = viv_cli.VivCli()
@@ -1060,100 +1242,6 @@ def GetErrorMode(emu, op=None):
     cconv.execCallReturn(emu, kernel.errormode, 0)
 
 
-
-#### posix function helpers
-def malloc(emu, op=None):
-    '''
-    emulator hook for malloc calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    size, = cconv.getCallArgs(emu, 1)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.malloc(size)
-    print("malloc(0x%x)  => 0x%x" % (size, allocated_ptr))
-
-    cconv.execCallReturn(emu, allocated_ptr, 0)
-
-def calloc(emu, op=None):
-    '''
-    emulator hook for malloc calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    elements, size = cconv.getCallArgs(emu, 2)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.malloc(size * elements)
-    print("calloc(0x%x, 0x%x)  => 0x%x" % (elements, size, allocated_ptr))
-
-    cconv.execCallReturn(emu, allocated_ptr, 0)
-
-def free(emu, op=None):
-    '''
-    emulator hook for free calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    va, = cconv.getCallArgs(emu, 1)
-    heap = getHeap(emu)
-    heap.free(va)
-    print("FREE: 0x%x" % va)
-    cconv.execCallReturn(emu, 0, 0)
-
-def realloc(emu, op=None):
-    '''
-    emulator hook for realloc calls
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    existptr, size = cconv.getCallArgs(emu, 2)
-
-    heap = getHeap(emu)
-    allocated_ptr = heap.realloc(existptr, size)
-    cconv.execCallReturn(emu, allocated_ptr, 0)
-
-def ret0(emu, op):
-    '''
-    emulator hook to just return 0
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.execCallReturn(emu, 0, 0)
-
-def ret1(emu, op):
-    '''
-    emulator hook to just return 1
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.execCallReturn(emu, 1, 0)
-
-def retneg1(emu, op):
-    '''
-    emulator hook to just return -1
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    cconv.execCallReturn(emu, -1, 0)
-
-
-def syslog(emu, op=None):
-    '''
-    emulator hook for calls to syslog
-    '''
-    ccname, cconv = getLibcCallConv(emu)
-    loglvl, strlength = cconv.getCallArgs(emu, 2)
-    string = readString(emu, strlength)
-    count = string.count('%')
-    neg2 = string.count('%%')
-    count -= (2*neg2)
-
-    args = cconv.getCallArgs(emu, count+2)[2:]
-    outstring = string % args
-    print("SYSLOG(%d): %s" % (loglvl, outstring))
-    for s in args:
-        if emu.isValidPointer(s):
-            print("\t" + readString(emu, s))
-    cconv.execCallReturn(emu, 0, 0)
-
-def nop(emu, op=None):
-    pass
-
 import_map = {
         '*.syslog': syslog,
         '*.malloc': malloc,
@@ -1180,12 +1268,17 @@ import_map = {
         'kernel32.EnterCriticalSection': EnterCriticalSection,
         'kernel32.LeaveCriticalSection': LeaveCriticalSection,
         'kernel32.DeleteCriticalSection': DeleteCriticalSection,
+        'kernel32.InterlockedCompareExchange': InterlockedCompareExchange,
         'kernel32.GetLastError': GetLastError,
         'kernel32.SetLastError': SetLastError,
         'kernel32.TlsAlloc': TlsAlloc,
         'kernel32.TlsGetValue': TlsGetValue,
         'kernel32.TlsSetValue': TlsSetValue,
         'kernel32.GetCurrentThreadId': GetCurrentThreadId,
+        'kernel32.GetCurrentProcessId': GetCurrentProcessId,
+        'kernel32.GetTickCount': GetTickCount,
+        'kernel32.GetSystemTimeAsFileTime': GetSystemTimeAsFileTime,
+        'kernel32.QueryPerformanceCounter': QueryPerformanceCounter,
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
         'kernel32.GetFileAttributesA': GetFileAttributesA,
@@ -1208,6 +1301,7 @@ import_map = {
         'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
         'msvcr100._strdup': strdup,
+        'msvcr100.??2@YAPAXI@Z': malloc,
         }
 
 
@@ -1262,12 +1356,17 @@ class WinKernel(dict):
         self.ntdll = None
         self.ntoskrnl = None
         self.errormode = win32const.SEM_FAILCRITICALERRORS
-        self.curthread = 0x31337
         self.last_error = 0
+
         try:
             self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
             self.ntdll = __import__(self.modbase + '.ntdll', {}, {}, 1)
             self.ntoskrnl = __import__(self.modbase + '.ntoskrnl', {}, {}, 1)
+
+            self.teb = self.ntdll.TEB()
+            self.peb = self.ntdll.PEB()
+            self.initFakePEB(arch=arch)
+
         except ImportError as e:
             print("error importing VStructs for Windows %d.%d_%s: %r" % (vermaj, vermin, arch, e))
         
@@ -1284,6 +1383,71 @@ class WinKernel(dict):
             0xa8: self.sys_win_MapViewOfSection,
             }
 
+    def getStackInfo(self):
+        stackbase = stacksize = 0
+        for mmva, mmsz, mmperm, mmname in self.emu.getMemoryMaps():
+            if mmname == '[stack]':
+                stackbase = mmva
+                stacksize = mmsz
+                return stackbase, stacksize
+
+    def initFakePEB(self, vermaj=6, vermin=1, arch=None, pid=0x47145, tid=0x31337):
+        '''
+        This is currently i386 only
+        '''
+        if arch is None:
+            arch = self.vw.arch.getArchName()
+
+        self.pebbase = self.emu.findFreeMemoryBlock(PEBSZ, 0x7ffd3000)
+        self.emu.addMemoryMap(self.pebbase, 6, 'FakePEB', b'\0'*PEBSZ)
+        self.tebbase = self.emu.findFreeMemoryBlock(TEBSZ, 0x7ffdc000)
+        self.emu.addMemoryMap(self.tebbase, 6, 'FakeTEB', b'\0'*TEBSZ)
+
+        # fake TEB(i386): c4eea6060000a70600e0a60600000000001e0000000000000040fd7f00000000401700000c140000000000002c40fd7f00c0fd7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+        # fake PEB(i386): 00000108ffffffff0000e7008088d277b817400000000000000040008083d27700000000000000000100000038d5dc7700000000000000000000eb77000000006082d277ffffffff0700000000006f7f0000000090056f7f0000fb7f2402fc7f4806fd7f01000000000000000000000000809b076de8ffff000010000020000000000100001000000c000000100000000085d27700005d0000000000140000004083d2770600000001000000b11d00010200000003000000060000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+        stackbase, stacksize = self.getStackInfo()
+
+        # populate the TEB/PEB structures
+        self.teb.NtTib.Self = self.tebbase
+        self.teb.NtTib.StackBase = stackbase + stacksize
+        self.teb.NtTib.StackLimit = stackbase
+        self.teb.NtTib.FiberData = 0x1e00
+        self.teb.CurrentLocale = 0x409
+
+        self.teb.ThreadLocalStoragePointer = self.pebbase + self.teb.vsGetOffset('ThreadLocalStoragePointer')
+        self.teb.ProcessEnvironmentBlock = self.pebbase
+
+        self.teb.ClientId.UniqueProcess = pid
+        self.teb.ClientId.UniqueThread = tid
+
+        # write everything to emulator memory
+        self.emu.writeMemory(self.tebbase, self.teb.vsEmit())
+        self.emu.writeMemory(self.pebbase, self.peb.vsEmit())
+
+        if self.emu.psize == 4:
+            self.emu.setSegmentInfo(e_i386.SEG_FS, self.tebbase, TEBSZ)
+        else:
+            self.emu.setSegmentInfo(e_i386.SEG_GS, self.tebbase, TEBSZ)
+
+    def getCurThread(self):
+        self.teb.vsParse(self.emu.readMemory(self.tebbase, len(self.teb)))
+        return self.teb.ClientId.UniqueThread
+
+    def getCurPid(self):
+        self.teb.vsParse(self.emu.readMemory(self.tebbase, len(self.teb)))
+        return self.teb.ClientId.UniqueProcess
+
+    def getLastError(self):
+        self.teb.vsParse(self.emu.readMemory(self.tebbase, len(self.teb)))
+        return self.teb.ClientId.UniqueProcess
+
+    def setLastError(self, last_error):
+        self.getLastError()
+        self.teb.LastErrorValue = last_error
+        self.emu.writeMemory(self.tebbase, self.teb.vsEmit())
+        return self.teb.ClientId.UniqueProcess
 
     def op_sysenter(self, emu, op):
         # handle select Windows syscalls
@@ -1306,6 +1470,24 @@ class WinKernel(dict):
         # for now
         retval = 0
         emu.setRegister(0, retval)
+
+    def GetTickCount(self):
+        '''
+        Retrieves the number of milliseconds that have elapsed since the system was started, up to 49.7 days.
+        '''
+        return int((time.time() - psutil.boot_time()) * 1000) & 0xffffffff
+
+    def GetSystemTimeAsFileTime(self):
+        '''
+        Retrieves the current system date and time. The information is in Coordinated Universal Time (UTC) format.
+        '''
+        return int(self.getWinAbsTime(time.time()))
+
+    def QueryPerformanceCounter(self):
+        '''
+        Retrieves the current value of the performance counter, which is a high resolution (<1us) time stamp that can be used for time-interval measurements.
+        '''
+        return int(time.time() * 1000000)
 
     def getWinAbsTime(self, ts_since_unix_epoch):
         return (11644473600 + ts_since_unix_epoch) * 10000000
@@ -1526,9 +1708,41 @@ def heapDump(emu):
     '''
     Dump the Heap allocations
     '''
-    print("Stack Dump:")
+    print("Heap Dump:")
     heap = getHeap(emu)
     print(heap.dump())
+
+import envi
+import platform
+def getWindowsDef(normname='ntdll', arch='i386', wver='6.1.7601', syswow=False):
+    '''
+    Get the correct set of Windows VStructs
+    '''
+    if wver is None:
+        bname, wver, stuff, whichkern = platform.win32_ver()
+    if arch is None:
+        arch = envi.getCurrentArch()
+
+    wvertup = wver.split('.')
+    if syswow:
+        arch = 'wow64'
+
+    modname = 'vstruct.defs.windows.win_%s_%s_%s.%s' % (wvertup[0], wvertup[1], arch, normname)
+
+    try:
+        mod = __import__(modname, {}, {}, 1)
+    except ImportError:
+        mod = None
+
+    if mod is None:
+        modname = 'vstruct.defs.windows.win_%s_%s_%s.%s' % (6, 3, arch, normname)
+
+    try:
+        mod = __import__(modname, {}, {}, 1)
+    except ImportError:
+        mod = None
+
+    return mod
 
 class TestEmulator:
     def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookfuncsbyname=False, **kwargs):
@@ -1572,10 +1786,18 @@ class TestEmulator:
 
         self.hookFuncs(importonly = not hookfuncsbyname)
 
-        self.teb = None
-        self.peb = None
-        if fakePEB:
-            self.initFakePEB()
+        self.op_handlers = {}   # for instructions like 'sysenter' which are not supported by the emu
+
+        plat = emu.vw.getMeta('Platform')
+        if plat.startswith('win'):
+            kernel = WinKernel(emu)
+        #elif plat.startswith('linux') or plat:
+        else:   # FIXME: need to make Elf identification better!!
+            kernel = LinuxKernel(emu)
+
+        emu.setMeta('kernel', kernel)
+        self.op_handlers['sysenter'] = kernel.op_sysenter
+
 
     def setFileInfo(self, filename, filebytes, fileattrib=0):
         '''
@@ -1583,25 +1805,6 @@ class TestEmulator:
         filedict is a dictionary of attributes/timestamps
         '''
         self.fs[filename] = (fileattrib, filebytes)
-
-    def initFakePEB(self):
-        '''
-        This is currently i386 only
-        '''
-        peb = self.emu.findFreeMemoryBlock(PEBSZ, 0x7ffd3000)
-        self.emu.addMemoryMap(peb, 6, 'FakePEB', b'\0'*PEBSZ)
-        teb = self.emu.findFreeMemoryBlock(TEBSZ, 0x7ffdc000)
-        self.emu.addMemoryMap(teb, 6, 'FakeTEB', b'\0'*TEBSZ)
-
-        self.emu.writeMemoryPtr(teb+0x30, peb)
-        # fake TEB: c4eea6060000a70600e0a60600000000001e0000000000000040fd7f00000000401700000c140000000000002c40fd7f00c0fd7f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-
-        # fake PEB: 00000108ffffffff0000e7008088d277b817400000000000000040008083d27700000000000000000100000038d5dc7700000000000000000000eb77000000006082d277ffffffff0700000000006f7f0000000090056f7f0000fb7f2402fc7f4806fd7f01000000000000000000000000809b076de8ffff000010000020000000000100001000000c000000100000000085d27700005d0000000000140000004083d2770600000001000000b11d00010200000003000000060000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-
-        if self.emu.psize == 4:
-            self.emu.setSegmentInfo(e_i386.SEG_FS, teb, TEBSZ)
-        else:
-            self.emu.setSegmentInfo(e_i386.SEG_GS, teb, TEBSZ)
 
 
     def hookFuncs(self, importonly=True):
@@ -1720,9 +1923,12 @@ class TestEmulator:
         emu = self.emu
         print("\nRegisters:")
         reggrps = emu.vw.arch.archGetRegisterGroups()
-        for name, gen_regs in reggrps:
-            if name == 'general':
-                break
+        if type(reggrps) == list:
+            for name, gen_regs in reggrps:
+                if name == 'general':
+                    break
+        elif type(reggrps) == dict:
+            gen_regs = reggrps.get('general')
 
         reg_table, meta_regs, PC_idx, SP_idx, reg_vals = emu.getRegisterInfo()
         if isinstance(emu, vtrace.Trace):
@@ -1758,13 +1964,16 @@ class TestEmulator:
         # Line feed
         print("\n")
 
-    def showFlags(self):
+    def showFlags(self, maxflags=20):
         """
         Show the contents of the Status Register
         """
         #print("\tStatus Flags: \tRegister: %s\n" % (bin(self.getStatusRegister())))
         try:
-            print("\tStatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in self.emu.getStatusFlags().items()]))
+            flags = self.emu.getStatusFlags().items()
+            if len(flags) > maxflags:
+                flags = list(flags)[:maxflags]
+            print("StatFlags: " + '\t'.join(["%s %s" % (f,v) for f,v in flags]))
         except Exception as e:
             print("no flags: ", e)
 
@@ -1850,18 +2059,6 @@ class TestEmulator:
         '''
         emu = self.emu
         self._follow = follow
-        self.op_handlers = {}   # for instructions like 'sysenter' which are not supported by the emu
-
-        plat = emu.vw.getMeta('Platform')
-        if plat.startswith('win'):
-            kernel = WinKernel(emu)
-        #elif plat.startswith('linux') or plat:
-        else:   # FIXME: need to make Elf identification better!!
-            kernel = LinuxKernel(emu)
-
-        emu.setMeta('kernel', kernel)
-        self.op_handlers['sysenter'] = kernel.op_sysenter
-
         mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
         self.mcanv = mcanv  # store it for later inspection
 
@@ -2120,29 +2317,6 @@ class TestEmulator:
                                     skipop = True
                                     break
 
-                                # the following functions are DEPRECATED
-                                elif uinp == 'memset':
-                                    print(memset(emu))
-                                    skipop = True
-                                elif uinp == 'memcpy':
-                                    print(memcpy(emu))
-                                    skipop = True
-                                elif uinp == 'strcpy':
-                                    print(strcpy(emu))
-                                    skipop = True
-                                elif uinp == 'strncpy':
-                                    print(strncpy(emu))
-                                    skipop = True
-                                elif uinp == 'strcat':
-                                    print(strcat(emu))
-                                    skipop = True
-                                elif uinp == 'strlen':
-                                    print(strlen(emu))
-                                    skipop = True
-
-                                elif uinp == 'malloc':
-                                    print(malloc(emu))
-                                    skipop = True
                                 else:
                                     try:
                                         lcls = {'next': nextva}
@@ -2179,47 +2353,7 @@ class TestEmulator:
 
                 if moveon:
                     continue
-                '''
-                # handle Calls separately
-                if op.isCall() and not skipop:
-                    self.dbgprint("Call...")
-                    handler = None
-                    for brva, brflags in op.getBranches(emu=emu):
-                        if brflags & envi.BR_FALL:
-                            continue
 
-                        taint = emu.getVivTaint(brva)
-                        if taint:
-                            taintval, tainttype, tainttuple = taint
-                            brva = tainttuple[0]
-
-                        self.dbgprint("brva: 0x%x  brflags: 0x%x" % (brva, brflags))
-                        handler = self.call_handlers.get(brva)
-                        if handler is not None:
-                            break
-
-                    self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
-                    if handler is not None:
-                        handler(emu, op)
-                        skipop = True
-
-                    elif self._follow and not skip and not skipop:
-                        # use the emulator to execute the call
-                        starteip = emu.getProgramCounter()
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.prehook(emu, op, starteip)
-
-                        emu.executeOpcode(op)
-                        endeip = emu.getProgramCounter()
-                        i += 1
-                        if hasattr(emu, 'emumon') and emu.emumon is not None:
-                            emu.emumon.posthook(emu, op, endeip)
-
-                        self.dbgprint("starteip: 0x%x, endeip: 0x%x  -> %s" % (starteip, endeip, emu.vw.getName(endeip)))
-                        if hasattr(emu, 'curpath'):
-                            vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
-                        skip = True
-                '''
                 if op.isCall() or op.iflags & envi.IF_BRANCH:
                     skip, skipop = self.handleBranch(op, skip, skipop)
 
@@ -2230,6 +2364,9 @@ class TestEmulator:
                     try:
                         emu.stepi()
                     except e_exc.UnsupportedInstruction:
+                        failed = True
+                    except e_exc.BreakpointHit:
+                        print("Breakpoint Hit!")
                         failed = True
 
                     # check for failure, and look for an op_handler. then raise an exception
@@ -2270,6 +2407,8 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 self.printStats(i)
+                nonstop = 0
+                pause = True
                 break
 
             except envi.SegmentationViolation:
@@ -2283,9 +2422,10 @@ class TestEmulator:
                     break
 
             except:
+                nonstop = 0
+                pause = True
                 import sys
                 sys.excepthook(*sys.exc_info())
-                nonstop = 0
 
         self.printStats(i)
 
