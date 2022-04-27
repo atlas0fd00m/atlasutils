@@ -26,6 +26,8 @@ import visgraph.pathcore as vg_pathcore
 import visgraph.graphcore as vg_graphcore
 import vivisect
 import vivisect.cli as v_cli
+import vivisect.qt.main as viv_qt_main
+
 import vivisect.remote.server as viv_server
 import vivisect.tools.graphutil as viv_graph
 import vivisect.symboliks as v_symbx
@@ -336,11 +338,13 @@ def getRemoteWorkspaceDialog(servername=None):
     if servername is not provided, it's assumed a workspace server is already
     setup and stored in global 'wsserver'
     '''
+    global wsserver
     if servername is not None:
         wsserver = viv_server.connectToServer(servername)
 
     wslist = wsserver.listWorkspaces()
-    dialog = vq_remote.VivServerDialog(wslist, parent=None)
+    #dialog = vq_remote.VivServerDialog(wslist, parent=None)
+    dialog = vq_remote.BaseServerDialog(wslist, parent=None)
     workspace = dialog.getWorkspaceName()
     return workspace
 
@@ -671,6 +675,9 @@ def interact(lcls, gbls, intro=""):
     else:
         print("SORRY, NO INTERACTIVE OPTIONS AVAILABLE!!  wtfo?")
 
+def gui(vw):
+    pass
+
 
 if __name__ == "__main__":
     global wsserver
@@ -702,7 +709,7 @@ if __name__ == "__main__":
     mcanvs = []
 
     if not args.workspace and None not in (args.server, args.shared):
-        args.workspace = '-'
+        args.workspace = ['-']
 
     for vwname in args.workspace:
         vw = v_cli.VivCli()

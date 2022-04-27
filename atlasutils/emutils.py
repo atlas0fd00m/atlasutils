@@ -717,7 +717,45 @@ def QueryPerformanceCounter(emu, op=None):
 
     cconv.execCallReturn(emu, 123, 1)   # non-zero on success
 
+def _initterm_e(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpFuncArrayStart, lpFuncArrayStop = cconv.getCallArgs(emu, 2)
+    errno = 0
 
+    print("_initterm_e(0x%x, 0x%x)" % (lpFuncArrayStart, lpFuncArrayStop))
+
+    # get return value and store it...
+    arryptr = lpFuncArrayStart
+    while arryptr < lpFuncArrayStop:
+        fnptr = emu.readMemoryPtr(arryptr)
+        if fnptr:
+            print("... 0x%x" % fnptr)
+            if not emu.isValidPointer(fnptr):
+                errno = -1
+            else:
+                # emulate each non-null function pointer
+                emu.doPush(0x82345678)
+                emu.setProgramCounter(fnptr)
+                emu.temu.runStep(silent=False, pause=False, finish=0x82345678)
+
+        arryptr += emu.psize
+                
+    sanitychk = emu.doPop()
+    if sanitychk != 0x82345678:
+        raise Exception("_initterm_e() stack craziness.  Investigate!")
+
+    cconv.execCallReturn(emu, errno, 2)
+
+def __dllonexit(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    func, pbegin, pend = cconv.getCallArgs(emu, 3)
+    print("__dllonexit(0x%x, 0x%x, 0x%x)" % (func, pbegin, pend))
+
+    retva = cconv.getReturnAddress(emu)
+    kernel._dllonexit(retva, func, pbegin, pend)
+
+    cconv.execCallReturn(emu, func, 3)
 
 # TODO: wrap this into a TLS object and strap it into the emulator like we do with the Heap
 tls_idxs = []
@@ -1362,6 +1400,8 @@ import_map = {
         'kernel32.DecodePointer': DecodePointer,
         'ntdll._vsnprintf': vsnprintf,
         'msvcr100._lock': _lock,
+        'msvcr100._unlock': _unlock,
+        'msvcr100.__dllonexit': __dllonexit,
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
@@ -1369,6 +1409,7 @@ import_map = {
         'msvcr100.strtok_s': strtok_s,
         'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
+        'msvcr100._initterm_e': _initterm_e,
         'msvcr100._malloc_crt': malloc,
         'msvcr100._strdup': strdup,
         'msvcr100.??2@YAPAXI@Z': malloc,
@@ -1428,6 +1469,7 @@ class WinKernel(dict):
         self.errormode = win32const.SEM_FAILCRITICALERRORS
         self.last_error = 0
         self.mutexes = {}
+        self.dllonexits = {}
 
         try:
             self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
@@ -1680,6 +1722,11 @@ class WinKernel(dict):
         retval = 0
         emu.setRegister(0, retval)
 
+    def _dllonexit(self, va, func, pbegin, pend):
+        if va in self.dllonexits:
+            print("overwriting dllonexits[0x%x]" % va)
+
+        self.dllonexits[va] = (func, pbegin, pend)
 
 class LinuxKernel(dict):
     def __init__(self, emu):
