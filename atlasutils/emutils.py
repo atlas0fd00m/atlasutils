@@ -556,6 +556,9 @@ def Sleep(emu, op=None):
     print("Sleep: dwMillisectonds: %d" % (dwMS))
     # calling getHeap initializes a heap.  we can cheat for now.  we may need to initialize new heaps here
     time.sleep(dwMS/1000)
+    emu.temu.pause = True
+    emu.temu.nonstop = 0
+
     cconv.execCallReturn(emu, 0, 1)
 
 def HeapCreate(emu, op=None):
@@ -646,17 +649,16 @@ def InterlockedCompareExchange(emu, op=None):
     import envi.interactive as ei; ei.dbg_interact(locals(), globals())
 
     ccname, cconv = getMSCallConv(emu, op.va)
-    Destination, ExChange, Comperand = cconv.getCallArgs(emu, 3)
+    Destination, xchgval, cmpval = cconv.getCallArgs(emu, 3)
     destval = emu.readMemValue(Destination, 4)
-    xchgval = emu.readMemValue(ExChange, 4)
-    cmpval  = emu.readMemValue(Comperand, 4)
+
+    print("InterlockedCompareExchange(0x%x, 0x%x, 0x%x)" % (destval, xchgval, cmpval))
 
     if destval == cmpval:
         emu.writeMemValue(Destination, xchgval, 4)
+        destval = xchgval
 
     cconv.execCallReturn(emu, destval, 3)
-
-
 
 def GetLastError(emu, op=None):
     kernel = emu.getMeta('kernel')
@@ -1082,6 +1084,34 @@ def CloseHandle(emu, op=None):
 
     cconv.execCallReturn(emu, hHandle, 1)
 
+def EncodePointer(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    ptr, = cconv.getCallArgs(emu, 1)
+    print("EncodePointer(0x%x) => 0x%x" % (ptr, ptr))
+
+    cconv.execCallReturn(emu, ptr, 1)
+
+def DecodePointer(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    ptr, = cconv.getCallArgs(emu, 1)
+    print("DecodePointer(0x%x) => 0x%x" % (ptr, ptr))
+
+    cconv.execCallReturn(emu, ptr, 1)
+
+def _lock(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    val, = cconv.getCallArgs(emu, 1)
+    print("_lock(%r)" % (val))
+
+    cconv.execCallReturn(emu, val, 0)
+
+def _unlock(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    val, = cconv.getCallArgs(emu, 1)
+    print("_unlock(%r)" % (val))
+
+    cconv.execCallReturn(emu, val, 0)
+
 
 def dupWorkspace(vw):
     newvw = viv_cli.VivCli()
@@ -1328,7 +1358,10 @@ import_map = {
         'kernel32.ReleaseMutex': ReleaseMutex,
         'kernel32.WaitForSingleObject': WaitForSingleObject,
         'kernel32.CloseHandle': CloseHandle,
+        'kernel32.EncodePointer': EncodePointer,
+        'kernel32.DecodePointer': DecodePointer,
         'ntdll._vsnprintf': vsnprintf,
+        'msvcr100._lock': _lock,
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
@@ -1336,6 +1369,7 @@ import_map = {
         'msvcr100.strtok_s': strtok_s,
         'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
+        'msvcr100._malloc_crt': malloc,
         'msvcr100._strdup': strdup,
         'msvcr100.??2@YAPAXI@Z': malloc,
         }
@@ -2099,6 +2133,7 @@ class TestEmulator:
         '''
         emu = self.emu
         self._follow = follow
+        self.pause = pause
         mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
         self.mcanv = mcanv  # store it for later inspection
 
@@ -2110,11 +2145,11 @@ class TestEmulator:
 
 
         self.nonstop = 0
-        tova = None
-        quit = False
-        moveon = False
-        emuBranch = False
-        silentUntil = None
+        self.tova = None
+        self.quit = False
+        self.moveon = False
+        self.emuBranch = False
+        self.silentUntil = None
 
         # set silentExcept to include all tracedict items
         silentExcept = [va for va, expr in tracedict.items() if expr is None]
@@ -2134,9 +2169,9 @@ class TestEmulator:
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem
 
-                # cancel emuBranch as we've come to one
+                # cancel self.emuBranch as we've come to one
                 if op.isReturn() or op.isCall():
-                    emuBranch = False
+                    self.emuBranch = False
 
                 #### TRACING 
                 for key in (pc, 'ALL'):
@@ -2158,9 +2193,9 @@ class TestEmulator:
 
                 ####
 
-                if silentUntil == pc:
+                if self.silentUntil == pc:
                     silent = False
-                    silentUntil = None
+                    self.silentUntil = None
                     self.printStats(i)
 
                 if silent and not pc in silentExcept:
@@ -2191,19 +2226,19 @@ class TestEmulator:
                     print("---------")
                     prompt = "q<enter> - exit, eval code to execute, 'skip' an instruction, 'b'ranch, 'go [+]#' to va or +# instrs or enter to continue: "
 
-                    # self.nonstop controls whether we stop.  tova indicates we're hunting for a va, otherwise 
+                    # self.nonstop controls whether we stop.  self.tova indicates we're hunting for a va, otherwise 
                     # treat self.nonstop as a negative-counter
-                    if tova is not None:
-                        if pc == tova:
+                    if self.tova is not None:
+                        if pc == self.tova:
                             self.nonstop = 0
 
                     elif self.nonstop:
                         self.nonstop -= 1
 
-                    if not (emuBranch or self.nonstop) and pause:
-                        tova = None
+                    if not (self.emuBranch or self.nonstop) and self.pause:
+                        self.tova = None
                         nextva = op.va + len(op)
-                        moveon = False
+                        self.moveon = False
 
                         # send the selected GUI window to current program counter
                         if self.guiFuncGraphName is not None and not silent:
@@ -2214,21 +2249,21 @@ class TestEmulator:
 
                         # UI Interface!  interact with the user
                         uinp = input(prompt)
-                        while len(uinp) and not (moveon or quit or emuBranch):
+                        while len(uinp) and not (self.moveon or self.quit or self.emuBranch):
                             try:
                                 if uinp == "q":
-                                    quit = True
+                                    self.quit = True
                                     break
 
                                 elif uinp.startswith('silent'):
                                     parts = uinp.split(' ')
-                                    silentUntil = parseExpression(emu, parts[-1], {'next':nextva})
-                                    print("silent until 0x%x" % silentUntil)
+                                    self.silentUntil = parseExpression(emu, parts[-1], {'next':nextva})
+                                    print("silent until 0x%x" % self.silentUntil)
                                     silent = True
 
                                 elif uinp in ('backtrace', 'bt'):
                                     self.backTrace()
-                                    moveon = True
+                                    self.moveon = True
                                     break
 
                                 elif uinp.startswith('go '):
@@ -2237,18 +2272,18 @@ class TestEmulator:
                                     if args[-1].startswith('+'):
                                         self.nonstop = parseExpression(emu, args[-1], {'next': nextva})
                                     else:
-                                        tova = parseExpression(emu, args[-1], {'next': nextva})
+                                        self.tova = parseExpression(emu, args[-1], {'next': nextva})
                                         self.nonstop = 1
                                     break
 
                                 elif uinp == 'ni':
                                     # next instruction (eg. skip over a call)
                                     self.nonstop = 1
-                                    tova = nextva
+                                    self.tova = nextva
                                     break
 
                                 elif uinp in ('b', 'branch'):
-                                    emuBranch = True
+                                    self.emuBranch = True
                                     break
 
                                 elif uinp.startswith('stack'):
@@ -2261,17 +2296,17 @@ class TestEmulator:
                                             print(e)
 
                                     self.stackDump(count)
-                                    moveon = True
+                                    self.moveon = True
                                     break
 
                                 elif uinp == 'heap':
                                     self.heapDump()
-                                    moveon = True
+                                    self.moveon = True
                                     break
 
                                 elif uinp == 'refresh':
                                     # basically does a NOP, doesn't change anything, just let the data be reprinted.
-                                    moveon = True
+                                    self.moveon = True
                                     break
 
                                 elif uinp.startswith('pc=') or uinp.startswith('pc ='):
@@ -2280,7 +2315,7 @@ class TestEmulator:
                                     newpc = parseExpression(emu, args[-1])
                                     print("new PC: 0x%x" % newpc)
                                     emu.setProgramCounter(newpc)
-                                    moveon = True
+                                    self.moveon = True
                                     break
 
                                 elif '=' in uinp:
@@ -2386,12 +2421,12 @@ class TestEmulator:
                             #self.printStats(i)
                             uinp = input(prompt)
 
-                if quit:
+                if self.quit:
                     print("Quitting!")
                     self.printStats(i)
                     return
 
-                if moveon:
+                if self.moveon:
                     continue
 
                 if op.isCall() or op.iflags & envi.IF_BRANCH:
@@ -2448,7 +2483,7 @@ class TestEmulator:
             except KeyboardInterrupt:
                 self.printStats(i)
                 self.nonstop = 0
-                pause = True
+                self.pause = True
                 break
 
             except envi.SegmentationViolation:
@@ -2463,7 +2498,7 @@ class TestEmulator:
 
             except:
                 self.nonstop = 0
-                pause = True
+                self.pause = True
                 import sys
                 sys.excepthook(*sys.exc_info())
 
