@@ -646,8 +646,6 @@ def DeleteCriticalSection(emu, op=None):
     cconv.execCallReturn(emu, 0, 1)
 
 def InterlockedCompareExchange(emu, op=None):
-    import envi.interactive as ei; ei.dbg_interact(locals(), globals())
-
     ccname, cconv = getMSCallConv(emu, op.va)
     Destination, xchgval, cmpval = cconv.getCallArgs(emu, 3)
     destval = emu.readMemValue(Destination, 4)
@@ -738,12 +736,49 @@ def _initterm_e(emu, op=None):
                 emu.setProgramCounter(fnptr)
                 emu.temu.runStep(silent=False, pause=False, finish=0x82345678)
 
-        arryptr += emu.psize
-                
-    sanitychk = emu.doPop()
-    if sanitychk != 0x82345678:
-        raise Exception("_initterm_e() stack craziness.  Investigate!")
 
+                sanitychk = emu.getProgramCounter()
+                if sanitychk != 0x82345678:
+                    raise Exception("_initterm_e() stack craziness.  Investigate! PC=0x%x", sanitychk)
+
+                retval = cconv.getReturnValue(emu)
+                if retval != 0:
+                    # in _e, we return any int value of the functions (as errors)
+                    errno = retval
+                    break
+
+        arryptr += emu.psize
+    
+    cconv.execCallReturn(emu, errno, 2)
+
+def _initterm(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpFuncArrayStart, lpFuncArrayStop = cconv.getCallArgs(emu, 2)
+    errno = 0
+
+    print("_initterm(0x%x, 0x%x)" % (lpFuncArrayStart, lpFuncArrayStop))
+
+    # get return value and store it...
+    arryptr = lpFuncArrayStart
+    while arryptr < lpFuncArrayStop:
+        fnptr = emu.readMemoryPtr(arryptr)
+        if fnptr:
+            print("... 0x%x" % fnptr)
+            if not emu.isValidPointer(fnptr):
+                errno = -1
+            else:
+                # emulate each non-null function pointer
+                cconv.setupCall(emu, ra=0x82345678)
+
+                emu.setProgramCounter(fnptr)
+                emu.temu.runStep(silent=False, pause=False, finish=0x82345678)
+
+                sanitychk = emu.getProgramCounter()
+                if sanitychk != 0x82345678:
+                    raise Exception("_initterm() stack craziness.  Investigate! PC=0x%x", sanitychk)
+
+        arryptr += emu.psize
+    
     cconv.execCallReturn(emu, errno, 2)
 
 def __dllonexit(emu, op=None):
@@ -841,7 +876,7 @@ def CompareStringA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 6)
 
-def findPath(filepath, libFileName, casein=False):
+def findPath(filepath, libFileName, casein=False, kernel=None):
     '''
     helper function to dig through paths and find a file
 
@@ -849,18 +884,26 @@ def findPath(filepath, libFileName, casein=False):
     libFileName is a filename we're looking for
     casesensitive
     '''
-    if casein:
-        libFileName = libFileName.upper()
+    if kernel:
+        sep = kernel.sep
 
-    for pathpart in filepath:
+    else:
+        sep = os.sep.encode('utf-8')
+
+    ulibFileName = libFileName.upper()
+
+    for pathpart, fakepart in filepath:
         for fname in os.listdir(pathpart):
             f = fname
+            uf = f.upper()
             if casein:
-                f = f.upper()
+                if uf == ulibFileName:
+                    return(sep.join([fakepart, fname]))
 
-            if f == libFileName:
-                return(os.sep.encode('utf-8').join([pathpart, fname]))
+            elif f == libFileName:
+                return(sep.join([fakepart, fname]))
 
+    # if we got here, we failed to find a file 
 
 def FreeLibrary(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -946,7 +989,7 @@ def LoadLibraryExA(emu, op=None):
         init = emu.vw.parseExpression(normfn + ".__entry")
 
         if init:
-            print("RUNNING LIBRARY INITIALIZER")
+            print("RUNNING LIBRARY INITIALIZER: %r" % libFileName)
             ccname, cconv = getMSCallConv(emu, init)
             cconv.allocateCallSpace(emu, 3)
             # set RET to 0x8831337
@@ -960,10 +1003,11 @@ def LoadLibraryExA(emu, op=None):
             emu.setProgramCounter(init)
             emu.temu.runStep(pause=False, runTil=0x8831337)
 
+            print("COMPLETED LIBRARY INITIALIZER: %r" % libFileName)
         else:
             print("No Library Init found, just returning")
 
-    import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+    #import envi.interactive as ei; ei.dbg_interact(locals(), globals())
     cconv.execCallReturn(emu, result, 3)
 
 DLL_PROCESS_DETACH = 0
@@ -1043,7 +1087,7 @@ def CreateMutexA(emu, op=None):
 
     kernel = emu.getMeta('kernel')
     kernel.mutexes[newmutex] = (op.va, lpMutexAttributes, bInitialOwner, name)
-    print("CreateMutexA: (0x%x, %r, 0x%x, 0x%x)" % (mutex, name, bInitialOwner, lpMutexAttributes))
+    print("CreateMutexA: (0x%x, %r, 0x%x, 0x%x)" % (newmutex, name, bInitialOwner, lpMutexAttributes))
     emu.writeMemory(newmutex, b"Mutex: %r" % name)
 
     cconv.execCallReturn(emu, newmutex, 3)
@@ -1409,7 +1453,9 @@ import_map = {
         'msvcr100.strtok_s': strtok_s,
         'msvcr100.strrchr': strrchr,
         'msvcr100.free': free,
+        'msvcr100._initterm': _initterm,
         'msvcr100._initterm_e': _initterm_e,
+        #'msvcr100._malloc_crt': _malloc_crt,
         'msvcr100._malloc_crt': malloc,
         'msvcr100._strdup': strdup,
         'msvcr100.??2@YAPAXI@Z': malloc,
@@ -1900,6 +1946,7 @@ class TestEmulator:
         self.environment = {}
         self.fs = {}
         self.filepath = kwargs.get('filepath', [])
+        self.files = kwargs.get('files', [])
 
         # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
         self.extFilePath = ''
