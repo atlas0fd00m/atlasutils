@@ -689,6 +689,20 @@ def GetTickCount(emu, op=None):
     print("GetTickCount()")
     cconv.execCallReturn(emu, tickcount, 0)
 
+def GetSystemTime(emu, op=None):
+    '''
+    Returns a pointer to a SYSTEMTIME structure
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpSystemTimeAsFileTime, = cconv.getCallArgs(emu, 1)
+    print("GetSystemTime(0x%x)" % lpSystemTimeAsFileTime)
+
+    winktime = kernel.GetSystemTime()
+    emu.writeMemoryFormat(lpSystemTimeAsFileTime, '<Q', winktime)
+
+    cconv.execCallReturn(emu, 0, 1)
+
 def GetSystemTimeAsFileTime(emu, op=None):
     '''
     Returns a pointer to a FILETIME structure which...
@@ -703,6 +717,24 @@ def GetSystemTimeAsFileTime(emu, op=None):
     emu.writeMemoryFormat(lpSystemTimeAsFileTime, '<Q', winktime)
 
     cconv.execCallReturn(emu, 0, 1)
+
+def SystemTimeToFileTime(emu, op=None):
+    '''
+    Returns a pointer to a FILETIME structure which...
+    Contains a 64-bit value representing the number of 100-nanosecond intervals since January 1, 1601 (UTC).
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpSystemTime, lpFileTime = cconv.getCallArgs(emu, 2)
+    print("SystemTimeToFileTime(0x%x, 0x%x)" % (lpSystemTime, lpFileTime))
+    # THIS IS A PROBLEM IF THEY ASSUME STACK IS CLEAN!!!!
+    sometimetup = tuple([emu.readMemValue(lpSystemTime + x, 2) for x in range(0, 16, 2)]) 
+    #sometime = tuple([sometimeraw[x:x+2] for x in range(0, 16, 2)])
+
+    winktime = kernel.SystemTimeToFileTime(sometimetup)
+    emu.writeMemoryFormat(lpFileTime, '<Q', winktime)
+
+    cconv.execCallReturn(emu, 1, 2)
 
 
 def QueryPerformanceCounter(emu, op=None):
@@ -1265,6 +1297,28 @@ def doWin32StringCompare(emu, op, \
 
     return CSTR_FAILURE
 
+
+import re
+def tokenizeFmtStr(fmt):
+    cfmt=b'''\
+    (                                  # start of capture group 1
+    %                                  # literal "%"
+    (?:                                # first option
+    (?:[-+0 #]{0,5})                   # optional flags
+    (?:\d+|\*)?                        # width
+    (?:\.(?:\d+|\*))?                  # precision
+    (?:h|l|ll|w|I|I32|I64)?            # size
+    [cCdiouxXeEfgGaAnpsSZ]             # type
+    ) |                                # OR
+    %%)                                # literal "%%"
+    '''
+
+    #for line in lines.splitlines():
+    #    print '"{}"\n\t{}\n'.format(line,
+    #           tuple((m.start(1), m.group(1)) for m in re.finditer(cfmt, line, flags=re.X)))
+
+    return tuple((m.start(1), m.group(1)) for m in re.finditer(cfmt, fmt, flags=re.X))
+
 def vsnprintf(emu, op=None):
     '''
     Simplistic, but good enough for most government work...
@@ -1302,7 +1356,82 @@ def vsnprintf(emu, op=None):
 
     input("vsnprintf: %r" % out)
     cconv.execCallReturn(emu, result, 4)
-    
+   
+
+def vsprintf_s(emu, op=None):
+    '''
+    Simplistic, but good enough for most government work...
+    '''
+    stackDump(emu)
+    ccname, cconv = getMSCallConv(emu, op.va, 'cdecl')
+    s, n, fmt, args = cconv.getCallArgs(emu, 4)
+    outfmt = emu.readMemString(fmt)
+
+    off = 0     # TODO: convert to index and do the math on read
+    arglist = []
+    lastfmtoff = 0
+
+    out = []
+    for fmtoff, fmtbit in tokenizeFmtStr(outfmt):
+        realstr = outfmt[lastfmtoff:fmtoff]
+        out.append(realstr)
+        lastfmtoff = fmtoff + len(fmtbit)
+
+        print(fmtoff, fmtbit)
+
+        bits = emu.readMemoryPtr(args + off)
+        if fmtbit.endswith(b's'):
+            strpart = emu.readMemString(bits)
+            out.append(fmtbit % strpart)
+            
+        elif b'll' in fmtbit:
+            fmtbit = fmtbit.replace(b'll', b'')
+            # number bigger
+            bits = emu.readMemValue(args + off, 8)
+            off += 4    # we're reading a 64-bit number??
+            out.append(fmtbit % bits)
+
+        elif b'l' in fmtbit:
+            fmtbit = fmtbit.replace(b'l', b'')
+            out.append(fmtbit % bits)
+
+        elif fmtbit.endswith(b'p'):
+            fmtbit = fmtbit.replace(b'p', b'x')
+            out.append(fmtbit % bits)
+
+        else:
+            out.append(fmtbit % bits)
+
+        off += 4
+
+        #bits = emu.readMemoryPtr(args + off)
+        #if emu.getMemoryMap(bits):
+        #    arglist.append(emu.readMemString(bits))     # ?
+        #else:
+        #    arglist.append(bits)
+        #off += 4
+
+    #while True:
+    #    #print(outfmt, tuple(arglist))
+    #    try:
+    #        out = outfmt % tuple(arglist)
+    #        break
+    #    except TypeError:
+    #        bits = emu.readMemoryPtr(args + off)
+    #        if emu.getMemoryMap(bits):
+    #            arglist.append(emu.readMemString(bits))
+    #        else:
+    #            arglist.append(bits)
+    #        off += 4
+
+    outstr = b''.join(out)[:n]
+    emu.writeMemory(s, outstr)
+    result = len(outstr)
+
+    input("vsprintf_s: %r" % outstr)
+    cconv.execCallReturn(emu, result, 4)
+   
+
 def getenv_s(emu, op=None):
     '''
     Get Environment Variables....
@@ -1425,7 +1554,9 @@ import_map = {
         'kernel32.GetCurrentThreadId': GetCurrentThreadId,
         'kernel32.GetCurrentProcessId': GetCurrentProcessId,
         'kernel32.GetTickCount': GetTickCount,
+        'kernel32.GetSystemTime': GetSystemTime,
         'kernel32.GetSystemTimeAsFileTime': GetSystemTimeAsFileTime,
+        'kernel32.SystemTimeToFileTime': SystemTimeToFileTime,
         'kernel32.QueryPerformanceCounter': QueryPerformanceCounter,
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
@@ -1459,6 +1590,7 @@ import_map = {
         'msvcr100._malloc_crt': malloc,
         'msvcr100._strdup': strdup,
         'msvcr100.??2@YAPAXI@Z': malloc,
+        'msvcr100.vsprintf_s': vsprintf_s,
         }
 
 
@@ -1638,11 +1770,51 @@ class WinKernel(dict):
         '''
         return int((time.time() - psutil.boot_time()) * 1000) & 0xffffffff
 
+    def GetSystemTime(self):
+        '''
+        Retrieves the current system date and time. The information is in Coordinated Universal Time (UTC) format.
+        '''
+        ut = time.localtime()
+        return (
+                ut[0],
+                ut[1],
+                ut[6],
+                ut[2],
+                ut[3],
+                ut[4],
+                ut[5],
+                0x7a69, # how can you resist having 31337 ms???
+                )
+
     def GetSystemTimeAsFileTime(self):
         '''
         Retrieves the current system date and time. The information is in Coordinated Universal Time (UTC) format.
         '''
         return int(self.getWinAbsTime(time.time()))
+
+    def SystemTimeToFileTime(self, systimetup):
+        '''
+        Retrieves the current system date and time. The information is in Coordinated Universal Time (UTC) format.
+        '''
+        sometime = self.SystemTimeToUnixFloat(systimetup)
+
+        return int(self.getWinAbsTime(sometime))
+
+    def SystemTimeToUnixFloat(self, systimetup):
+        '''
+        '''
+        unixtup = (
+                systimetup[0],
+                systimetup[1],
+                systimetup[3],
+                systimetup[4],
+                systimetup[5],
+                systimetup[6],
+                systimetup[2],
+                0,
+                -1,
+                )
+        return time.mktime(unixtup)
 
     def QueryPerformanceCounter(self):
         '''
@@ -1974,6 +2146,18 @@ class TestEmulator:
         '''
         self.fs[filename] = (fileattrib, filebytes)
 
+    def addCallHandler(self, addrexpr, handler):
+        '''
+        Add callback handlers to the TestEmulator.  
+        Instead of handing in addresses, hand in expressions for a more dynamic
+        lookup (say, you want to use the same tools between different workspace
+        with different file load locations!
+        '''
+        if type(addrexpr) in (str, bytes):
+            addrexpr = self.emu.parseExpression(addrexpr)
+
+        if self.vw.isValidPointer(addrexpr):
+            self.call_handlers[addrexpr] = handler
 
     def hookFuncs(self, importonly=True):
         if not hasattr(self.emu, 'vw') or self.emu.vw is None:
@@ -2257,7 +2441,8 @@ class TestEmulator:
 
                 pc = emu.getProgramCounter()
                 if pc in (runTil, finish):
-                    print("PC reached 0x%x." % pc)
+                    if not silent:
+                        print("PC reached 0x%x." % pc)
                     break
 
                 op = emu.parseOpcode(pc)
@@ -2396,6 +2581,23 @@ class TestEmulator:
                                 elif uinp == 'heap':
                                     self.heapDump()
                                     self.moveon = True
+                                    break
+
+                                elif uinp.startswith('malloc'):
+                                    self.moveon = True
+                                    size = 32
+
+                                    if ' ' in uinp:
+                                        parts = uinp.split(' ', 1)
+                                        try:
+                                            size = parseExpression(emu, parts[1], {})
+                                        except Exception as e:
+                                            print("ERROR with size, using default 32bytes : %r" % e)
+
+                                    heap = getHeap(emu)
+                                    chunk = heap.malloc(size)
+                                    print("MALLOC:  New chunk:  0x%x" % chunk)
+
                                     break
 
                                 elif uinp == 'refresh':
@@ -2596,7 +2798,8 @@ class TestEmulator:
                 import sys
                 sys.excepthook(*sys.exc_info())
 
-        self.printStats(i)
+        if not silent:
+            self.printStats(i)
 
     def handleBranch(self, op, skip, skipop):
         '''
