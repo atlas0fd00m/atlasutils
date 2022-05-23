@@ -2082,6 +2082,62 @@ def getWindowsDef(normname='ntdll', arch='i386', wver='6.1.7601', syswow=False):
 
     return mod
 
+def makeArgs(emu, args=[]):
+    '''
+    This function takes a list of args and attempts to intelligently convert
+    them into something usable with CallingConvention.setupCall().
+
+    The list can be one of a few things:
+    * Integers (these are just used straight out, careful on the sizing!)
+    * Bytestrings - heap space is carved out and the string copied into it
+    * tuple('name', arg) - allows you to set a name for the arg specifically
+
+    In addition to placing the data in the right emulator locations/registers,
+    the emulator metadata also holds a copy so you can emulate a function and
+    easily see where heap-based arguments were stored for later retrieval.  
+    Unnamed args (default) are given the name:
+        "Arg%d" % argnum
+
+    str's are utf-encoded to get bytes objects
+
+    *note: only heap-allocations for strings affect the emulator.  Arguments
+    are not actually setup for the emulator, this simply adjusts the list
+    so the calling convention can work its magic.
+
+    Output is a list appropriate for cconv's setupCall().
+
+    Not perfect, but highly useful.
+    '''
+    heap = aemu.getHeap(emu)
+    outargs = []
+    for arg in args:
+        aname = "Arg%d" % len(outargs)
+
+        if type(arg) in (tuple, list):
+            # if we hand in a tuple/list, the first item is the name, second is the arg
+            # names are stored in the emulator's metadata
+            aname = arg[0]
+            arg = arg[1]
+
+        if type(arg) == str:
+            # convert strs to bytes
+            arg = arg.encode('utf-8')
+
+        if type(arg) == bytes:
+            # if it's a bytes (or formerly str), malloc some memory for it
+            # use the pointer as the argument
+            ptr = heap.malloc(len(arg) + 1)
+            emu.writeMemory(ptr, arg)
+            outargs.append(ptr)
+
+            emu.setMeta(aname, ptr)
+
+        else:
+            outargs.append(arg)
+            emu.setMeta(aname, arg)
+
+    return outargs
+
 class TestEmulator:
     def __init__(self, emu, vw=None, verbose=False, fakePEB=False, guiFuncGraphName=None, hookfuncsbyname=False, **kwargs):
         '''
@@ -2160,6 +2216,17 @@ class TestEmulator:
             self.call_handlers[addrexpr] = handler
 
     def hookFuncs(self, importonly=True):
+        '''
+        Automagically setup call-hooks for external functions we know about.
+
+        The end result is that the TestEmulator's call_handlers dictionary 
+        is automatically populated based on function names and the mapping
+        done by import_map.
+
+        Requires that TestEmulator has access to a VivWorkspace.  Either:
+        * self.vw
+        * self.emu.vw
+        '''
         if not hasattr(self.emu, 'vw') or self.emu.vw is None:
             return
 
@@ -2184,6 +2251,37 @@ class TestEmulator:
             if name in import_map:
                 self.call_handlers[va] = import_map.get(name)
                 print("Mapping call_handler by *name*: %r => 0x%x" % (name, va))
+
+    def setupCall(self, fva, ezargs=[], retaddr=0x47145, ccname=None):
+        '''
+        Easily setup an emulator to call into a function.
+
+        Args are setup (see docstring for makeArgs()), space allocated (if 
+        necessary) for Return Address, and return address setup, then the
+        Program Counter is pointed at the function you wish to call.
+
+        In the end, it's as if the call already happened.
+
+        This function is highly dependent upon correct Calling Convention
+        being identified by Vivisect, or the ccname being handed into this
+        function.
+        '''
+        emu = self.emu
+
+        # convert from ezargs to all pointers
+        args = makeArgs(emu, ezargs)
+
+        if type(fva) == str:
+            fva = emu.vw.parseExpression(fva)
+
+        # use the ccname if provided, or figure it out from the Workspace
+        if ccname is None:
+            api = emu.getCallApi(fva)
+            ccname = api[2]
+
+        cconv = emu.getCallingConvention(ccname)
+        cconv.setupCall(emu, args=args, ra=retaddr)
+        emu.setProgramCounter(fva)
 
     def printMemStatus(self, op=None, use_cached=False):
         emu = self.emu
