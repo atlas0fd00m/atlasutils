@@ -35,6 +35,7 @@ SNAP_SWAP = 3
 
 PEBSZ = 4096
 TEBSZ = 4096
+TLSSZ = 4096
 
 def parseExpression(emu, expr, lcls={}):
     '''
@@ -1631,11 +1632,18 @@ class SystemCallNotImplemented(Exception):
 
     def __repr__(self):
         return "SystemCall 0x%x (%d) not implemented at 0x%x: %r" % (self.callnum, self.op.va, self.op)
+class Kernel(dict):
+    def __init__(self, emu):
+        dict.__init__(self)
+        self.emu = emu
+
+        # setup key files db here
+        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
+        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
 
 class WinKernel(dict):
     def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False):
-        dict.__init__(self)
-        self.emu = emu
+        Kernel.__init__(self, emu)
 
         if syswow:
             arch = 'wow64'
@@ -1663,10 +1671,6 @@ class WinKernel(dict):
         except ImportError as e:
             print("error importing VStructs for Windows %d.%d_%s: %r" % (vermaj, vermin, arch, e))
         
-        # setup key files db here
-        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
-        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
-
         # actual syscall handlers
         self.win_syscalls = {    # worked up on Win7-32
             0xd9: self.sys_win_NtQueryAttributesFile,  # ntdll.ntQueryAttributesFile
@@ -1946,25 +1950,27 @@ class WinKernel(dict):
 
         self.dllonexits[va] = (func, pbegin, pend)
 
-class LinuxKernel(dict):
+class LinuxKernel(Kernel):
     def __init__(self, emu):
-        dict.__init__(self)
-        self.emu = emu
-
+        Kernel.__init__(self, emu)
         
-        # setup key files db here
-        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
-        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
+        self.tlsbase = self.emu.findFreeMemoryBlock(TLSSZ, 0x7ffd3000)
+        self.emu.addMemoryMap(self.tlsbase, 6, 'FakeTLS', b'\0'*TLSSZ)
+
+        if self.emu.psize == 4:
+            self.emu.setSegmentInfo(e_i386.SEG_FS, self.tlsbase, TLSSZ)
+        else:
+            self.emu.setSegmentInfo(e_i386.SEG_GS, self.tlsbase, TLSSZ)
 
         # actual syscall handlers
-        win_syscalls = {
-            }
+        lin_syscalls = {
+        }
 
 
     def op_sysenter(krnl, emu, op):
-        # handle select Windows syscalls
+        # handle select Linux syscalls
         callnum = emu.getRegister(0)
-        syscall = krnl.win_syscalls.get(callnum)
+        syscall = krnl.lin_syscalls.get(callnum)
         if syscall is not None:
             syscall(emu, op)
 
@@ -2108,7 +2114,7 @@ def makeArgs(emu, args=[]):
 
     Not perfect, but highly useful.
     '''
-    heap = aemu.getHeap(emu)
+    heap = getHeap(emu)
     outargs = []
     for arg in args:
         aname = "Arg%d" % len(outargs)
