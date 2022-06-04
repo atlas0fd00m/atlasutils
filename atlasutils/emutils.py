@@ -909,6 +909,35 @@ def CompareStringA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 6)
 
+def findInternalPath(kernel, libFileName, casein=False):
+    if kernel is not None:
+        sep = kernel.sep
+
+    else:
+        sep = os.sep
+
+    ulibFileName = libFileName.upper()
+    
+    for filepath in kernel.fs:
+        meta = filepath.rsplit(sep, 1)
+        if len(meta) == 2:
+            path, fname = meta
+        else:
+            path = '.'
+            fname = meta
+
+        f = fname
+        uf = f.upper()
+
+        if casein:
+            if uf == ulibFileName:
+                return(sep.join([path, fname]))
+
+        elif f == libFileName:
+            return(sep.join([path, fname]))
+
+    # if we got here, we failed to find a file 
+
 def findPath(filepath, libFileName, casein=False, kernel=None):
     '''
     helper function to dig through paths and find a file
@@ -944,12 +973,14 @@ def FreeLibrary(emu, op=None):
     fname = emu.vw.getFileByVa(hLibModule)
 
     print("FreeLibrary(0x%x)  (%r)" % (hLibModule, fname))
-    # Yeah, we don't *gotta* do nothin... and ain't *gonna* do nothin
+    kernel = emu.getMeta('kernel')
+    kernel.freeLibrary(hLibModule, fname)
 
     cconv.execCallReturn(emu, hLibModule, 1)
 
 
 def LoadLibraryExA(emu, op=None):
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
     lpLibFileName, hFile, dwFlags = cconv.getCallArgs(emu, 3)
     libFileName = emu.readMemString(lpLibFileName)
@@ -977,6 +1008,8 @@ def LoadLibraryExA(emu, op=None):
             try:
                 result = emu.vw.parseExpression(normfn)
                 print("Map loaded...")
+                # register with the Kernel that we're loading (in the future, more LoadLibrary functionality may move there)
+                kernel.loadLibrary(result, normfn)
 
                 break
 
@@ -1004,9 +1037,13 @@ def LoadLibraryExA(emu, op=None):
                         print("Analyzing...")
                         emu.vw.analyze()
 
+
+                    libva = emu.vw.parseExpression(normfn)
+
                     # merge the imported memory maps from the Workspace into the emu
                     print("Sync VW maps to EMU...")
                     syncEmuWithVw(emu.vw, emu)
+                    kernel.loadLibrary(result, normfn)
                     print("Synced")
                 except Exception as e:
                     print("Error while attempting to load %r:  %r" % (normfn, e))
@@ -1018,7 +1055,7 @@ def LoadLibraryExA(emu, op=None):
                 print(e)
 
         # run Library Init routine (__entry)
-        ret = emu.readMemoryPtr(emu.getStackCounter())
+        ret = emu.readMemoryPtr(emu.getStackCounter())  # FIXME: this only works on archs where RET is pushed to the stack
         init = emu.vw.parseExpression(normfn + ".__entry")
 
         if init:
@@ -1072,27 +1109,37 @@ def GetModuleFileNameA(emu, op=None):
     '''
     kernel32.GetModuleFileNameA
     '''
+    kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
     hModule, lpFilename, nSize = cconv.getCallArgs(emu, 3)
     print("GetModuleFilenameA(0x%x, 0x%x, 0x%x)" % (hModule, lpFilename, nSize))
 
     if hModule:
-        curname = emu.vw.getFileByVa(hModule)
-        curname += '.dll'
+        curname = emu.vw.getFileByVa(hModule).encode('utf8')
+        curname += b'.dll'
     else:
-        curname = "Filename.exe"
+        curname = b"Filename.exe"
     print("GetModuleFileNameA(%r)" % curname)
 
-    ## do we want this?
-    filepath = findPath(emu.temu.filepath, curname, casein=True)
+    # search internal data structures for this module's path
+    print("kernel: %r" % kernel)
+    filepath = findInternalPath(kernel, curname, casein=True)
+
+    # if we don't find it internally, check the filesystem(s) mapped in through the "kernel"
+    if not filepath:
+        filepath = findPath(emu.temu.filepath, curname, casein=True, kernel=emu.getMeta('kernel'))
+
     print("GetModuleFileNameA() -> %r" % filepath)
 
-    if not filepath:
+    if filepath:
+        curname = filepath
+
+    else:
         uinp = input("  (%r):" % curname)
         if len(uinp):
             curname = uinp
 
-    retname = curname.encode('utf-8')
+    retname = curname
     
     if retname[-1] != b'\0':
         retname += b'\0'
@@ -1213,6 +1260,14 @@ def DecodePointer(emu, op=None):
 
     cconv.execCallReturn(emu, ptr, 1)
 
+def _amsg_exit(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+    val, = cconv.getCallArgs(emu, 1)
+    print("_amsg_exit(0x%x) - the Process Should Now TERMINATE!" % (val))
+    emu.temu.resetNonstop()
+
+    cconv.execCallReturn(emu, val, 1)
+
 def _lock(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
     val, = cconv.getCallArgs(emu, 1)
@@ -1245,13 +1300,36 @@ def dupWorkspace(vw):
 
     return newvw
 
-def syncEmuWithVw(vw, emu):
+def syncEmuWithVw(vw, emu, name=None, refresh=False):
+    '''
+    make Emulator maps to match those in the Workspace.
+    if name is specified, only maps with that name will be copied
+    if refresh, if maps exist, copy the contents from the Workspace (like a clean load)
+    '''
+    print("Sync'ing Emulator memory maps from Workspace")
     for mmva, mmsz, mmperm, mmname in vw.getMemoryMaps():
-        if emu.isValidPointer(mmva):
+        done = False
+
+        # if we're specific about the name, skip all other maps
+        if name is not None and name != mmname:
             continue
 
-        # not a valid pointer in the emu, add the map
-        emu.addMemoryMap(mmva, mmperm, mmname, vw.readMemory(mmva, mmsz))
+        # if the emulator map already exists
+        if emu.isValidPointer(mmva):
+            if not refresh:
+                print("skipping map at 0x%x (%r) because map already exists" % (mmva, mmname))
+                continue
+
+            else:
+                emu._supervisor = True
+                emu.writeMemory(mmva, vw.readMemory(mmva, mmsz))
+                emu._supervisor = False
+                done = True
+
+        # if we haven't already refreshed, we must need to add the memory map
+        if not done:
+            emu.addMemoryMap(mmva, mmperm, mmname, vw.readMemory(mmva, mmsz))
+
 
 CSTR_FAILURE = 0
 CSTR_LESS_THAN = 1
@@ -1590,8 +1668,10 @@ import_map = {
         #'msvcr100._malloc_crt': _malloc_crt,
         'msvcr100._malloc_crt': malloc,
         'msvcr100._strdup': strdup,
-        'msvcr100.??2@YAPAXI@Z': malloc,
+        'msvcr100.??2@YAPAXI@Z': HeapAlloc,
+        'msvcr100.??3@YAPAXI@Z': HeapFree,
         'msvcr100.vsprintf_s': vsprintf_s,
+        'msvcr100._amsg_exit': _amsg_exit,
         }
 
 
@@ -1633,17 +1713,18 @@ class SystemCallNotImplemented(Exception):
     def __repr__(self):
         return "SystemCall 0x%x (%d) not implemented at 0x%x: %r" % (self.callnum, self.op.va, self.op)
 class Kernel(dict):
-    def __init__(self, emu):
+    def __init__(self, emu, **kwargs):
         dict.__init__(self)
         self.emu = emu
 
         # setup key files db here
-        self['fs'] = collections.defaultdict(dict)    # perhaps create file objects, for now this.
-        self['fhandles'] = {}   # store a connection between a handle and a member of 'fs'
+        self.fs = kwargs.get('fs', collections.defaultdict(dict))    # perhaps create file objects, for now this.
+        self.fhandles = kwargs.get('fhandles', {})   # store a connection between a handle and a member of 'fs'
 
-class WinKernel(dict):
-    def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False):
-        Kernel.__init__(self, emu)
+class WinKernel(Kernel):
+    sep = b'\\'
+    def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False, **kwargs):
+        Kernel.__init__(self, emu, **kwargs)
 
         if syswow:
             arch = 'wow64'
@@ -1656,6 +1737,8 @@ class WinKernel(dict):
         self.last_error = 0
         self.mutexes = {}
         self.dllonexits = {}
+
+        self.freedLibs = collections.defaultdict(dict)
 
         try:
             self.win32k = __import__(self.modbase + '.win32k', {}, {}, 1)
@@ -1679,6 +1762,41 @@ class WinKernel(dict):
             0x54: self.sys_win_NtCreateSection,
             0xa8: self.sys_win_MapViewOfSection,
             }
+
+    def freeLibrary(self, va, libname):
+        '''
+        '''
+        if not self.emu.isValidPointer(va):
+            raise Exception("WinKernel.freeLibrary(0x%x, %r) address does not exist in current emulator" % va, libname)
+
+        libdict = self.freedLibs[libname]
+        libdict['freed'] = libdict.get('freed', 0) + 1
+        libdict['imgbase'] = va
+
+    def loadLibrary(self, va, libname):
+        '''
+        '''
+        libdict = self.freedLibs[libname]
+        libdict['load'] = libdict.get('load', 0) + 1
+
+        loadcnt = libdict.get('load')
+        freecnt = libdict.get('freed')
+        if freecnt:     # if we've already freed this library...
+            if loadcnt == freecnt:
+                # something is wrong
+                print("loadLibrary(0x%x, %r) called and BEEN FREED TOO MANY TIMES (freed: %r load: %r)"\
+                        % (va, libname, freecnt, loadcnt))
+
+            elif loadcnt == freecnt+1:
+                # this is a reload 
+                print("loadLibrary(0x%x, %r) Reload" % (va, libname))
+                # should we unload and reload the memory maps?  or just skip emulating the __entry?
+                syncEmuWithVw(self.emu.vw, self.emu, name=libname, refresh=True)
+
+        else:   # first time load
+            print("loadLibrary(0x%x, %r) loading" % (va, libname))
+
+
 
     def getStackInfo(self):
         stackbase = stacksize = 0
@@ -1951,8 +2069,9 @@ class WinKernel(dict):
         self.dllonexits[va] = (func, pbegin, pend)
 
 class LinuxKernel(Kernel):
-    def __init__(self, emu):
-        Kernel.__init__(self, emu)
+    sep = b'/'
+    def __init__(self, emu, **kwargs):
+        Kernel.__init__(self, emu, **kwargs)
         
         self.tlsbase = self.emu.findFreeMemoryBlock(TLSSZ, 0x7ffd3000)
         self.emu.addMemoryMap(self.tlsbase, 6, 'FakeTLS', b'\0'*TLSSZ)
@@ -2180,7 +2299,6 @@ class TestEmulator:
         self.environment = {}
         self.fs = {}
         self.filepath = kwargs.get('filepath', [])
-        self.files = kwargs.get('files', [])
 
         # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
         self.extFilePath = ''
@@ -2192,10 +2310,10 @@ class TestEmulator:
 
         plat = emu.vw.getMeta('Platform')
         if plat.startswith('win'):
-            kernel = WinKernel(emu)
+            kernel = WinKernel(emu, fs=self.fs, filepath=self.filepath)
         #elif plat.startswith('linux') or plat:
         else:   # FIXME: need to make Elf identification better!!
-            kernel = LinuxKernel(emu)
+            kernel = LinuxKernel(emu, fs=self.fs, filepath=self.filepath)
 
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
@@ -2216,7 +2334,7 @@ class TestEmulator:
         with different file load locations!
         '''
         if type(addrexpr) in (str, bytes):
-            addrexpr = self.emu.parseExpression(addrexpr)
+            addrexpr = self.vw.parseExpression(addrexpr)
 
         if self.vw.isValidPointer(addrexpr):
             self.call_handlers[addrexpr] = handler
@@ -2454,6 +2572,14 @@ class TestEmulator:
         print("since start: %d instructions in %.3f secs: %3f ops/sec" % \
                 (i, dtime, i//dtime))
 
+    def resetNonstop(self):
+        '''
+        Reset pause, nonstop, and tova
+        '''
+        self.pause = True
+        self.nonstop = 0
+        self.tova = None
+
     def runStep(self, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None):
         '''
         runStep is the core "debugging" functionality for this emulation-helper.  it's goal is to 
@@ -2516,6 +2642,7 @@ class TestEmulator:
         emu = self.emu
         self._follow = follow
         self.pause = pause
+        self.silent = silent
         mcanv = e_memcanvas.StringMemoryCanvas(emu, syms=emu.vw)
         self.mcanv = mcanv  # store it for later inspection
 
@@ -2545,7 +2672,7 @@ class TestEmulator:
 
                 pc = emu.getProgramCounter()
                 if pc in (runTil, finish):
-                    if not silent:
+                    if not self.silent:
                         print("PC reached 0x%x." % pc)
                     break
 
@@ -2577,11 +2704,11 @@ class TestEmulator:
                 ####
 
                 if self.silentUntil == pc:
-                    silent = False
+                    self.silent = False
                     self.silentUntil = None
                     self.printStats(i)
 
-                if silent and not pc in silentExcept:
+                if self.silent and not pc in silentExcept:
                     showafter = False
                 else:
                     # do all the interface stuff here:
@@ -2624,7 +2751,7 @@ class TestEmulator:
                         self.moveon = False
 
                         # send the selected GUI window to current program counter
-                        if self.guiFuncGraphName is not None and not silent:
+                        if self.guiFuncGraphName is not None and not self.silent:
                             if self.vwg is not None:
                                 self.vwg.sendFuncGraphTo(pc, self.guiFuncGraphName)
                             else:
@@ -2642,7 +2769,7 @@ class TestEmulator:
                                     parts = uinp.split(' ')
                                     self.silentUntil = parseExpression(emu, parts[-1], {'next':nextva})
                                     print("silent until 0x%x" % self.silentUntil)
-                                    silent = True
+                                    self.silent = True
 
                                 elif uinp in ('backtrace', 'bt'):
                                     self.backTrace()
@@ -2802,9 +2929,10 @@ class TestEmulator:
 
                                         out = eval(uinp, globals(), lcls)
 
-                                        taint = emu.getVivTaint(out)
-                                        if taint:
-                                            out = "taint: %s: %s" % (taint[1], emu.reprVivTaint(taint))
+                                        if type(out) == int:
+                                            taint = emu.getVivTaint(out)
+                                            if taint:
+                                                out = "taint: %s: %s" % (taint[1], emu.reprVivTaint(taint))
                                         
                                         if type(out) == int:
                                             print(hex(out))
@@ -2902,7 +3030,7 @@ class TestEmulator:
                 import sys
                 sys.excepthook(*sys.exc_info())
 
-        if not silent:
+        if not self.silent:
             self.printStats(i)
 
     def handleBranch(self, op, skip, skipop):
