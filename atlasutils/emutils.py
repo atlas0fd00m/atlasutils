@@ -2678,6 +2678,8 @@ class TestEmulator:
 
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem
+                #print("0x%x" % op.va)
+                op.va = pc # handle wild-ass bug i ran into in the wild?!?  caching bug?
 
                 # cancel self.emuBranch as we've come to one
                 if op.isReturn() or op.isCall():
