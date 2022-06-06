@@ -909,6 +909,93 @@ def CompareStringA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 6)
 
+def fopen(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu, op.va)
+    pFilename, pMode = cconv.getCallArgs(emu, 2)
+
+    filename = emu.readMemString(pFilename)
+    mode = emu.readMemString(pMode)
+
+    cconv.execCallReturn(emu, result, 2)
+
+
+class FakeFile:
+    '''
+    FakeFile allows us to use a File-like object for files only defined in the 
+    TestEmulator as bytes() objects.  Behaves similar to _io.BufferedReader.
+    '''
+    def __init__(self, filename, data=b'', mode='rb', off=0):
+        self.filename = filename
+        self._filenum = None
+        self.closed = False
+        self.data = data
+        self.off = off
+
+    def close(self):
+        self.closed = True
+
+    def flush(self):
+        pass
+
+    def fileno(self):
+        return self._filenum
+
+    def peek(self):
+        if self.closed:
+            raise ValueError("FakeFile is Closed")
+
+        return self.data[self.off:]
+
+    def read(self, length=None):
+        if b'r' not in self.mode and\
+                b'+' not in self.mode:
+            raise io.UnsupportedOperation("Writing to a file opened for read")
+
+        if self.closed:
+            raise ValueError("FakeFile is Closed")
+
+        if length:
+            retval =  self.data[self.off:self.off+length]
+            self.off += length
+            return retval
+
+        retval = self.data[self.off:]
+        self.off = len(self.data)
+        return retval
+        
+    def seek(self, offset):
+        if self.closed:
+            raise ValueError("FakeFile is Closed")
+
+        self.off = offset
+
+    def tell(self):
+        if self.closed:
+            raise ValueError("FakeFile is Closed")
+
+        return self.off
+
+    def write(self, data=b''):
+        if b'w' not in self.mode and\
+                b'a' not in self.mode and\
+                b'+' not in self.mode:
+            raise io.UnsupportedOperation("Writing to a file opened for read")
+
+        if self.closed:
+            raise ValueError("FakeFile is Closed")
+
+        self.data = self.data[:self.off] + data + self.data[self.off + len(data):]
+
+    def _save(self, filename=None):
+        '''
+        Allow the saving of the updated file to a real file.
+        '''
+        if not filename:
+            filename = self.filename
+
+        open(filename, 'wb').write(self.data)
+
+
 def findInternalPath(kernel, libFileName, casein=False):
     if kernel is not None:
         sep = kernel.sep
@@ -1717,9 +1804,61 @@ class Kernel(dict):
         dict.__init__(self)
         self.emu = emu
 
+        self.errno = 0
+
         # setup key files db here
         self.fs = kwargs.get('fs', collections.defaultdict(dict))    # perhaps create file objects, for now this.
         self.fhandles = kwargs.get('fhandles', {})   # store a connection between a handle and a member of 'fs'
+        # File Descriptors
+        self.fds = [sys.stdin, sys.stdout, sys.stderr]
+
+    def registerFd(self, fd):
+        # a little hacky, since this will apply a fake filenum to real files
+        # but no biggie.  we need some consistency for FakeFiles and real files
+        # to coexist in our fake little world here.
+        fd._filenum = len(self.fds)     
+        self.fds.append(fd)
+        return fd._filenum
+
+    def fopen(self, filename, mode):
+        '''
+        Find the file of interest, check our permissions (TestEmulator and *Kernel 
+        should protect users from malicious code)
+        '''
+        # find file in path
+        ## first check files we've defined as strings in the TestEmulator
+        filepath = findInternalPath(self, filename, self.isFsCaseSensitive())
+        if filepath:
+            # we have an internal file, ie. one we invented in the TestEmulator.
+            meta = self.fs[filename]
+            if meta[0] & FILE_ATTRIBUTE_NORMAL:
+                # found the file.  make and register a FakeFile object
+                fakefile = FakeFile(filename, meta[1], mode)
+                retval = self.registerFd(fakefile)
+
+            else:
+                # This is not a normal file.  don't open.
+                retval = 0
+                raise IsADirectoryError(filename)
+
+        else:
+            ## next check the mapped in filesystem
+
+            # FIXME: in the future: move filepath and all file stuffs into the Kernel
+            filepath = findPath(self.emu.temu.filepath, filename, not self.isFsCaseSensitive())
+            if filepath:
+                # check mode (and what we want to permit)
+                # open file and place file object in kernel.fds
+                realfile = open(filepath, mode)
+                retval = self.registerFd(realfile)
+
+            else:
+                # the file doesn't exist....
+                retval = 0
+                raise FileNotFoundError(filename)
+
+        return retval
+
 
 class WinKernel(Kernel):
     sep = b'\\'
@@ -1762,6 +1901,9 @@ class WinKernel(Kernel):
             0x54: self.sys_win_NtCreateSection,
             0xa8: self.sys_win_MapViewOfSection,
             }
+
+    def isFsCaseSensitive(self):
+        return False
 
     def freeLibrary(self, va, libname):
         '''
@@ -2085,6 +2227,9 @@ class LinuxKernel(Kernel):
         lin_syscalls = {
         }
 
+
+    def isFsCaseSensitive(self):
+        return True
 
     def op_sysenter(krnl, emu, op):
         # handle select Linux syscalls
