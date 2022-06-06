@@ -909,6 +909,11 @@ def CompareStringA(emu, op=None):
 
     cconv.execCallReturn(emu, result, 6)
 
+
+ENOENT = 2
+ENOTDIR = 20
+EISDIR = 21
+
 def fopen(emu, op=None):
     ccname, cconv = getLibcCallConv(emu, op.va)
     pFilename, pMode = cconv.getCallArgs(emu, 2)
@@ -916,7 +921,29 @@ def fopen(emu, op=None):
     filename = emu.readMemString(pFilename)
     mode = emu.readMemString(pMode)
 
-    cconv.execCallReturn(emu, result, 2)
+    kernel = emu.getMeta('kernel')
+
+    retval = 0
+
+    try:
+        retval, myfile = kernel.fopen(filename, mode)
+
+    except FileNotFoundError:
+        kernel.errno = ENOENT
+
+    except IsADirectoryError:
+        kernel.errno = EISDIR
+
+    except:
+        print("fopen:  unhandled exception:")
+        import traceback
+        traceback.print_exc()
+        uinp = input("Press Enter to Continue or 'q' to quit ")
+        if uinp.startswith('q'):
+            emu.temu.resetNonstop()
+
+
+    cconv.execCallReturn(emu, retval, 2)
 
 
 class FakeFile:
@@ -996,7 +1023,7 @@ class FakeFile:
         open(filename, 'wb').write(self.data)
 
 
-def findInternalPath(kernel, libFileName, casein=False):
+def findInternalPath(kernel, libFileName, casein=False, matchFnOnly=True):
     if kernel is not None:
         sep = kernel.sep
 
@@ -1006,6 +1033,7 @@ def findInternalPath(kernel, libFileName, casein=False):
     ulibFileName = libFileName.upper()
     
     for filepath in kernel.fs:
+        # carve up the path and filename info
         meta = filepath.rsplit(sep, 1)
         if len(meta) == 2:
             path, fname = meta
@@ -1013,7 +1041,12 @@ def findInternalPath(kernel, libFileName, casein=False):
             path = '.'
             fname = meta
 
-        f = fname
+        # if we want to find a file in the path, or match an actual full path:
+        if matchFnOnly:
+            f = fname
+        else:
+            f = filepath
+
         uf = f.upper()
 
         if casein:
@@ -1023,36 +1056,48 @@ def findInternalPath(kernel, libFileName, casein=False):
         elif f == libFileName:
             return(sep.join([path, fname]))
 
-    # if we got here, we failed to find a file 
+    raise FileNotFoundError(libFileName)
 
-def findPath(filepath, libFileName, casein=False, kernel=None):
+def findExtPath(filepath, libFileName, casein=False, kernel=None, matchFnOnly=True):
     '''
     helper function to dig through paths and find a file
 
     filepath is a list of directories
     libFileName is a filename we're looking for
-    casesensitive
+    casein means filenames are not case-sensitive.
+    matchFnOnly means we're searching for a File.  Otherwise, we're matching an exact path
+
+    Returns a Fake path and a Real path (for the current OS file-path)
+        Fake path is helpful for GetModuleFileName*
+        Real path is helpful for actually opening the file
+
     '''
-    if kernel:
+    ossep = os.sep.encode('utf-8')
+
+    if kernel is not None:
         sep = kernel.sep
 
     else:
-        sep = os.sep.encode('utf-8')
+        sep = ossep
 
     ulibFileName = libFileName.upper()
 
     for pathpart, fakepart in filepath:
         for fname in os.listdir(pathpart):
-            f = fname
+            if matchFnOnly:
+                f = fname
+            else:
+                f = sep.join([fakepart, fname])
+
             uf = f.upper()
             if casein:
                 if uf == ulibFileName:
-                    return(sep.join([fakepart, fname]))
+                    return(sep.join([fakepart, fname]), ossep.join([pathpart, fname]))
 
             elif f == libFileName:
-                return(sep.join([fakepart, fname]))
+                return(sep.join([fakepart, fname]), ossep.join([pathpart, fname]))
 
-    # if we got here, we failed to find a file 
+    raise FileNotFoundError(libFileName)
 
 def FreeLibrary(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -1107,7 +1152,7 @@ def LoadLibraryExA(emu, op=None):
            
                 try:
                     # TODO: take a path and go hunting for the dll in the path
-                    filepath = findPath(emu.temu.filepath, libFileName)
+                    filepath = findExtPath(emu.temu.filepath, libFileName, kernel=kernel)
                     if not filepath:
                         filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
                         if filepath == "None":
@@ -1214,7 +1259,7 @@ def GetModuleFileNameA(emu, op=None):
 
     # if we don't find it internally, check the filesystem(s) mapped in through the "kernel"
     if not filepath:
-        filepath = findPath(emu.temu.filepath, curname, casein=True, kernel=emu.getMeta('kernel'))
+        filepath = findExtPath(emu.temu.filepath, curname, casein=True, kernel=kernel)
 
     print("GetModuleFileNameA() -> %r" % filepath)
 
@@ -1789,6 +1834,10 @@ class win32const:
     SEM_NOGPFAULTERRORBOX = 0x0002  # The system does not display the Windows Error Reporting dialog.
     SEM_NOOPENFILEERRORBOX = 0x8000 # The system does not display a message box when it fails to find a file. Instead, the error is returned to the calling process.
 
+
+FILE_ATTRIB_DEFAULT = win32const.FILE_ATTRIBUTE_ARCHIVE | win32const.FILE_ATTRIBUTE_NORMAL
+
+
 #### SYSENTER/SYSCALL helpers
 class SystemCallNotImplemented(Exception):
     def __init__(self, callnum, emu, op):
@@ -1799,6 +1848,7 @@ class SystemCallNotImplemented(Exception):
 
     def __repr__(self):
         return "SystemCall 0x%x (%d) not implemented at 0x%x: %r" % (self.callnum, self.op.va, self.op)
+
 class Kernel(dict):
     def __init__(self, emu, **kwargs):
         dict.__init__(self)
@@ -1820,6 +1870,56 @@ class Kernel(dict):
         self.fds.append(fd)
         return fd._filenum
 
+    def openInternalFile(self, libFileName, mode):
+        '''
+        '''
+        meta = None
+        casein = not self.isFsCaseSensitive()
+        fullpath = findInternalPath(self, libFileName, casein, matchFnOnly=False)
+
+        try:
+            # we have an internal file, ie. one we invented in the TestEmulator.
+            meta = self.fs[fullpath]
+
+        except KeyError:
+            raise FileNotFoundError(libFileName)
+
+        # file exists and we now have meta
+        if meta[0] & win32const.FILE_ATTRIBUTE_NORMAL:
+            # found the file.  make and register a FakeFile object
+            fakefile = FakeFile(libFileName, meta[1], mode)
+            retval = self.registerFd(fakefile)
+
+        else:
+            # This is not a normal file.  don't open.
+            retval = 0
+            raise IsADirectoryError(filename)
+
+        return retval, fakefile
+
+    def openExtFile(self, libFilePath, mode):
+        '''
+        Return an external file based on filepath mapping.
+        libFilePath is a full path
+
+        bytes() not str()
+        '''
+        if type(mode) == bytes:
+            mode = mode.decode('utf8')
+
+        if not 'b' in mode:
+            mode = 'b' + mode
+
+        filepath = self.emu.temu.filepath
+        print("Attempting to open external file: %r")
+        fakepath, realpath = findExtPath(filepath, libFilePath, not self.isFsCaseSensitive(), kernel=self, matchFnOnly=False)
+        realfile = open(realpath, mode)
+        retval = self.registerFd(realfile)
+
+        # TODO: exception handling?
+        return retval, realfile
+
+
     def fopen(self, filename, mode):
         '''
         Find the file of interest, check our permissions (TestEmulator and *Kernel 
@@ -1827,37 +1927,19 @@ class Kernel(dict):
         '''
         # find file in path
         ## first check files we've defined as strings in the TestEmulator
-        filepath = findInternalPath(self, filename, self.isFsCaseSensitive())
-        if filepath:
-            # we have an internal file, ie. one we invented in the TestEmulator.
-            meta = self.fs[filename]
-            if meta[0] & FILE_ATTRIBUTE_NORMAL:
-                # found the file.  make and register a FakeFile object
-                fakefile = FakeFile(filename, meta[1], mode)
-                retval = self.registerFd(fakefile)
+        retval = None
+        try:
+            retval, myfile = self.openInternalFile(filename, mode)
+            return retval, myfile
 
-            else:
-                # This is not a normal file.  don't open.
-                retval = 0
-                raise IsADirectoryError(filename)
-
-        else:
-            ## next check the mapped in filesystem
-
-            # FIXME: in the future: move filepath and all file stuffs into the Kernel
-            filepath = findPath(self.emu.temu.filepath, filename, not self.isFsCaseSensitive())
-            if filepath:
-                # check mode (and what we want to permit)
-                # open file and place file object in kernel.fds
-                realfile = open(filepath, mode)
-                retval = self.registerFd(realfile)
-
-            else:
-                # the file doesn't exist....
-                retval = 0
-                raise FileNotFoundError(filename)
-
-        return retval
+        except FileNotFoundError:
+            # not an internal file... but we need to check the mappings
+            pass
+        
+        ## next check the mapped in filesystem
+        # FIXME: in the future: move filepath and all file stuffs into the Kernel
+        myfile = self.openExtFile(filename, mode)
+        return retval, myfile
 
 
 class WinKernel(Kernel):
