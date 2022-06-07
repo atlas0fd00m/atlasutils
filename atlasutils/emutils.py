@@ -911,39 +911,105 @@ def CompareStringA(emu, op=None):
 
 
 ENOENT = 2
+EACCES = 13
 ENOTDIR = 20
 EISDIR = 21
 
 def fopen(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu, op.va)
+    ccname, cconv = getLibcCallConv(emu)
     pFilename, pMode = cconv.getCallArgs(emu, 2)
 
     filename = emu.readMemString(pFilename)
     mode = emu.readMemString(pMode)
+    print("fopen(%r, %r)" % (filename, mode))
 
-    kernel = emu.getMeta('kernel')
+    uinp = None
+    while uinp not in ('Y', 'N'):
+        uinp = input("Are you sure you want to allow this?  (Y/N)")
 
-    retval = 0
+    if uinp == 'N':
+        retval = EACCES
 
-    try:
-        retval, myfile = kernel.fopen(filename, mode)
+    else:
 
-    except FileNotFoundError:
-        kernel.errno = ENOENT
+        kernel = emu.getMeta('kernel')
 
-    except IsADirectoryError:
-        kernel.errno = EISDIR
+        retval = 0
 
-    except:
-        print("fopen:  unhandled exception:")
-        import traceback
-        traceback.print_exc()
-        uinp = input("Press Enter to Continue or 'q' to quit ")
-        if uinp.startswith('q'):
-            emu.temu.resetNonstop()
+        try:
+            retval, myfile = kernel.fopen(filename, mode)
 
+        except FileNotFoundError:
+            kernel.errno = ENOENT
+
+        except IsADirectoryError:
+            kernel.errno = EISDIR
+
+        except:
+            print("fopen:  unhandled exception:")
+            import traceback
+            traceback.print_exc()
+            uinp = input("Press Enter to Continue or 'q' to quit ")
+            if uinp.startswith('q'):
+                emu.temu.resetNonstop()
+
+        print("DONE:  %r   %r" % (retval, myfile))
 
     cconv.execCallReturn(emu, retval, 2)
+
+def fread(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    pBuffer, size, count, stream = cconv.getCallArgs(emu, 4)
+    print("fread(0x%x, 0x%x, 0x%x, %r)" % (pBuffer, size, count, stream))
+
+    kernel = emu.getMeta('kernel')
+    data = kernel.fds[stream].read(size)
+    if len(data) > 100:
+        print("  == %r..." % data[:100])
+    else:
+        print("  == %r" % data)
+    emu.writeMemory(pBuffer, data)
+    retval = len(data)
+
+    cconv.execCallReturn(emu, retval, 4)
+
+def fwrite(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    pBuffer, size, count, stream = cconv.getCallArgs(emu, 4)
+    print("fwrite(0x%x, 0x%x, 0x%x, %r)" % (pBuffer, size, count, stream))
+
+    kernel = emu.getMeta('kernel')
+    data = emu.readMemory(pBuffer, size)
+    if len(data) > 100:
+        print("  == %r..." % data[:100])
+    else:
+        print("  == %r" % data)
+    
+    kernel.fds[stream].write(data)
+    retval = len(data)
+
+    cconv.execCallReturn(emu, retval, 4)
+
+def fclose(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    stream, = cconv.getCallArgs(emu, 1)
+    print("fclose(%r)" % (stream))
+
+    kernel = emu.getMeta('kernel')
+    kernel.fds[stream].close()
+
+    cconv.execCallReturn(emu, 0, 1)
+
+def isspace(emu, op=None):
+    '''
+    '''
+    ccname, cconv = getLibcCallConv(emu)
+    c, = cconv.getCallArgs(emu, 1)
+    print("isspace(0x%x)" % (c))
+
+    retval = (c in (0x9, 0xd, 0x20))
+
+    cconv.execCallReturn(emu, retval, 4)
 
 
 class FakeFile:
@@ -1150,35 +1216,32 @@ def LoadLibraryExA(emu, op=None):
                 # if we don't have it already loaded and resolvable in the workspace
                 # we must load it
            
-                try:
-                    # TODO: take a path and go hunting for the dll in the path
-                    filepath = findExtPath(emu.temu.filepath, libFileName, kernel=kernel)
-                    if not filepath:
-                        filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
-                        if filepath == "None":
-                            result = 0
-                            break
+            try:
+                filepath = findExtPath(emu.temu.filepath, libFileName, kernel=kernel)
+                if not filepath:
+                    filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
+                    if filepath == "None":
+                        result = 0
+                        break
 
-                    print("Loading...")
-                    normfn = emu.vw.loadFromFile(filepath)
-                    go = True
-                    print("Loaded")
+                print("Loading...")
+                normfn = emu.vw.loadFromFile(filepath)
+                go = True
+                print("Loaded")
 
-                    # if we have it setup, run vw.analyze()
-                    if emu.getMeta("AnalyzeLoadLibraryLoads", False):
-                        print("Analyzing...")
-                        emu.vw.analyze()
+                # if we have it setup, run vw.analyze()
+                if emu.getMeta("AnalyzeLoadLibraryLoads", False):
+                    print("Analyzing...")
+                    emu.vw.analyze()
 
 
-                    libva = emu.vw.parseExpression(normfn)
+                libva = emu.vw.parseExpression(normfn)
 
-                    # merge the imported memory maps from the Workspace into the emu
-                    print("Sync VW maps to EMU...")
-                    syncEmuWithVw(emu.vw, emu)
-                    kernel.loadLibrary(result, normfn)
-                    print("Synced")
-                except Exception as e:
-                    print("Error while attempting to load %r:  %r" % (normfn, e))
+                # merge the imported memory maps from the Workspace into the emu
+                print("Sync VW maps to EMU...")
+                syncEmuWithVw(emu.vw, emu)
+                kernel.loadLibrary(result, normfn)
+                print("Synced")
 
             except KeyboardInterrupt:
                 break
@@ -1804,6 +1867,11 @@ import_map = {
         'msvcr100.??3@YAPAXI@Z': HeapFree,
         'msvcr100.vsprintf_s': vsprintf_s,
         'msvcr100._amsg_exit': _amsg_exit,
+        'msvcr100.fopen': fopen,
+        'msvcr100.fread': fread,
+        'msvcr100.fwrite': fwrite,
+        'msvcr100.fclose': fclose,
+        'msvcr100.isspace': isspace,
         }
 
 
@@ -1929,8 +1997,9 @@ class Kernel(dict):
         ## first check files we've defined as strings in the TestEmulator
         retval = None
         try:
-            retval, myfile = self.openInternalFile(filename, mode)
-            return retval, myfile
+            return self.openInternalFile(filename, mode)
+            #retval, myfile = self.openInternalFile(filename, mode)
+            #return retval, myfile
 
         except FileNotFoundError:
             # not an internal file... but we need to check the mappings
@@ -1938,8 +2007,9 @@ class Kernel(dict):
         
         ## next check the mapped in filesystem
         # FIXME: in the future: move filepath and all file stuffs into the Kernel
-        myfile = self.openExtFile(filename, mode)
-        return retval, myfile
+        return self.openExtFile(filename, mode)
+        #retval, myfile = self.openExtFile(filename, mode)
+        #return retval, myfile
 
 
 class WinKernel(Kernel):
@@ -2545,6 +2615,12 @@ class TestEmulator:
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
 
+
+    def getKernel(self):
+        '''
+        Returns the Kernel object registered in the Emulator metadata
+        '''
+        return self.emu.getMeta('kernel')
 
     def setFileInfo(self, filename, filebytes, fileattrib=0):
         '''
