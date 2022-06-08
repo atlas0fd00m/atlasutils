@@ -27,6 +27,7 @@ from binascii import hexlify, unhexlify
 from atlasutils.errno import *
 from envi.expression import ExpressionFail
 
+from envi.const import MM_READ, MM_WRITE, MM_EXEC
 
 SNAP_NORM = 0
 SNAP_CAP = 1
@@ -767,8 +768,7 @@ def _initterm_e(emu, op=None):
                 # emulate each non-null function pointer
                 emu.doPush(0x82345678)
                 emu.setProgramCounter(fnptr)
-                emu.temu.runStep(silent=False, pause=False, finish=0x82345678)
-
+                emu.temu.runStep(silent=emu.temu.silent, pause=False, finish=0x82345678)
 
                 sanitychk = emu.getProgramCounter()
                 if sanitychk != 0x82345678:
@@ -782,6 +782,7 @@ def _initterm_e(emu, op=None):
 
         arryptr += emu.psize
     
+    print("_initterm_e(0x%x, 0x%x) COMPLETE" % (lpFuncArrayStart, lpFuncArrayStop))
     cconv.execCallReturn(emu, errno, 2)
 
 def _initterm(emu, op=None):
@@ -804,7 +805,7 @@ def _initterm(emu, op=None):
                 cconv.setupCall(emu, ra=0x82345678)
 
                 emu.setProgramCounter(fnptr)
-                emu.temu.runStep(silent=False, pause=False, finish=0x82345678)
+                emu.temu.runStep(silent=emu.temu.silent, pause=False, finish=0x82345678)
 
                 sanitychk = emu.getProgramCounter()
                 if sanitychk != 0x82345678:
@@ -812,6 +813,7 @@ def _initterm(emu, op=None):
 
         arryptr += emu.psize
     
+    print("_initterm(0x%x, 0x%x) COMPLETE" % (lpFuncArrayStart, lpFuncArrayStop))
     cconv.execCallReturn(emu, errno, 2)
 
 def __dllonexit(emu, op=None):
@@ -910,6 +912,19 @@ def CompareStringA(emu, op=None):
     cconv.execCallReturn(emu, result, 6)
 
 
+def testPolicy(mode, fs_policy):
+    perms = 0
+    if b'r' in mode:
+        perms |= MM_READ
+
+    if b'a' in mode or b'+' in mode:
+        perms |= MM_READ | MM_WRITE
+
+    if b'w' in mode:
+        perms |= MM_WRITE
+
+    return (fs_policy & perms) == perms
+
 ENOENT = 2
 EACCES = 13
 ENOTDIR = 20
@@ -923,16 +938,24 @@ def fopen(emu, op=None):
     mode = emu.readMemString(pMode)
     print("fopen(%r, %r)" % (filename, mode))
 
+    # check policy.  if this mode is not allowed, prompt the user
     uinp = None
+    kernel = emu.getMeta('kernel')
+    if testPolicy(mode, kernel.fs_policy):
+        uinp = 'Y'
+
+    elif not kernel.fs_polprompt:
+        # we're *not* to prompt, just fail.
+        uinp = 'N'
+
     while uinp not in ('Y', 'N'):
         uinp = input("Are you sure you want to allow this?  (Y/N)")
 
+    # once we tested policy and asked the user for their permission, continue accordinly
     if uinp == 'N':
         retval = EACCES
 
     else:
-
-        kernel = emu.getMeta('kernel')
 
         retval = 0
 
@@ -962,8 +985,10 @@ def fread(emu, op=None):
     pBuffer, size, count, stream = cconv.getCallArgs(emu, 4)
     print("fread(0x%x, 0x%x, 0x%x, %r)" % (pBuffer, size, count, stream))
 
+    length = size * count
+
     kernel = emu.getMeta('kernel')
-    data = kernel.fds[stream].read(size)
+    data = kernel.fds[stream].read(length)
     if len(data) > 100:
         print("  == %r..." % data[:100])
     else:
@@ -978,8 +1003,10 @@ def fwrite(emu, op=None):
     pBuffer, size, count, stream = cconv.getCallArgs(emu, 4)
     print("fwrite(0x%x, 0x%x, 0x%x, %r)" % (pBuffer, size, count, stream))
 
+    length = size * count
+
     kernel = emu.getMeta('kernel')
-    data = emu.readMemory(pBuffer, size)
+    data = emu.readMemory(pBuffer, length)
     if len(data) > 100:
         print("  == %r..." % data[:100])
     else:
@@ -1404,8 +1431,23 @@ def WaitForSingleObject(emu, op=None):
 
     objbytes = emu.readMemory(hHandle, 32)        # FIXME: make this more meaningful
     print("WaitForSingleObject(0x%x, %d)  => %r" % (hHandle, dwMillis, objbytes))
+
+    # write "Acquired"
+    mutup = kernel.mutexes.get(hHandle)
+
+    if mutup is None:
+        pass    # not a Mutex.  TODO: unify kernel interface for WFSO-able objs
+    else:
+        op.va, lpMutexAttributes, bInitialOwner, lpName = mutup
+        mutdata = emu.readMemory(hHandle, 32)
+        mutdata = mutdata[:-10] + b"Acquired\0\0"
+
+        emu.writeMemory(hHandle, mutdata)
+
     input()
     
+    # TODO: roll through supported object types and check/reserve them
+    # Mutexes from the WinKernel
     result = WAIT_OBJECT_0
 
     cconv.execCallReturn(emu, result, 2)
@@ -1921,6 +1963,8 @@ class Kernel(dict):
     def __init__(self, emu, **kwargs):
         dict.__init__(self)
         self.emu = emu
+        self.fs_policy = 0  # 7 means allow Read/Write/Execute: see MM_READ
+        self.fs_polprompt = True
 
         self.errno = 0
 
@@ -1929,6 +1973,22 @@ class Kernel(dict):
         self.fhandles = kwargs.get('fhandles', {})   # store a connection between a handle and a member of 'fs'
         # File Descriptors
         self.fds = [sys.stdin, sys.stdout, sys.stderr]
+
+    def setFsPolicy(self, fs_policy=0, prompt=True):
+        '''
+        FileSystem policy indicates what level of permissions this emulator 
+        has to read/write/exec in the filesystem.  If fs_policy is loose 
+        (eg. MM_READ|MM_WRITE|MM_EXEC), the emulator can read/write/execute 
+        without prompting the user.  If the required permissions are not
+        allowed (default fs_policy is 0, aka.  nothing), the user is prompted,
+        and *no default* is used.  The user must reply with "Y" or "N".  This
+        is to ensure you are aware of what impact you are having.
+
+        If you *don't* want to be prompted (some use-cases this makes sense),
+        set prompt to False.
+        '''
+        self.fs_policy = fs_policy
+        self.fs_polprompt = prompt
 
     def registerFd(self, fd):
         # a little hacky, since this will apply a fake filenum to real files
@@ -3447,7 +3507,7 @@ class TestEmulator:
             if pc == eip or op.mnem == mnem:
                 break
             emu.stepi()
-        runStep(emu)
+        self.runStep()
 
     def printWriteLog(self):
         print('\n'.join(['0x%.8x: 0x%.8x << %32r %r' % (x,y,d.hex(),d) for x,y,d in self.emu.path[2].get('writelog')]))
@@ -3460,7 +3520,6 @@ class TestEmulator:
         for va, tva, data in self.emu.path[2].get('writelog'):
             insertComment(vw, va, "[W:%x] %r (%r)" % (tva, data.hex(), data))
 
-from envi.memory import MM_READ
 def readMemString(self, va, maxlen=0xfffffff, wide=False):
     '''
     Returns a C-style string from memory.  Stops at Memory Map boundaries, or the first NULL (\x00) byte.
