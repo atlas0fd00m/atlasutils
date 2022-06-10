@@ -68,14 +68,14 @@ class TraceMonitor(v_i_monitor.AnalysisMonitor):
 
 testemu = None
 call_handlers = {}
-def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, verbose=False, guiFuncGraphName=None):
+def runStep(emu, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, verbose=False, guiFuncGraphName=None, bps=()):
     global testemu
 
     if testemu is None or testemu.emu != emu:
         testemu = TestEmulator(emu, verbose=verbose, guiFuncGraphName=guiFuncGraphName)
         testemu.call_handlers.update(call_handlers)
     
-    testemu.runStep(maxstep=maxstep, follow=follow, showafter=showafter, runTil=runTil, pause=pause, silent=silent, finish=finish, tracedict=tracedict)
+    testemu.runStep(maxstep=maxstep, follow=follow, showafter=showafter, runTil=runTil, pause=pause, silent=silent, finish=finish, tracedict=tracedict, bps=bps)
 
 
 def readString(emu, va, CHUNK=50):
@@ -1293,7 +1293,7 @@ def LoadLibraryExA(emu, op=None):
             cconv.setCallArgs(emu, [instance, reason, reserved])
     
             emu.setProgramCounter(init)
-            emu.temu.runStep(pause=False, runTil=0x8831337)
+            emu.temu.runStep(silent=emu.temu.silent, pause=False, runTil=0x8831337)
 
             print("COMPLETED LIBRARY INITIALIZER: %r" % libFileName)
         else:
@@ -2656,6 +2656,14 @@ class TestEmulator:
         self.environment = {}
         self.fs = {}
         self.filepath = kwargs.get('filepath', [])
+        self.bps = kwargs.get('bps', ())
+
+        self.ctxStack = []
+        self.pause = True
+        self.nonstop = 0
+        self.tova = None
+        self.runTil = None
+        self.silent = False
 
         # extFilePath is used for LoadLibrary* type functions, where fs items are inappropriate
         self.extFilePath = ''
@@ -2675,6 +2683,31 @@ class TestEmulator:
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
 
+
+    def storeContext(self):
+        '''
+        Store nonstop context (not registers or memory, just config) to
+        allow call_handlers to call runStep() for "side projects" like 
+        LoadLibrary and _initterm to easily run their initialization functions
+        '''
+        self.ctxStack.append((self.pause, 
+            self.nonstop, 
+            self.tova, 
+            self.silent, 
+            self.runTil,
+            self.guiFuncGraphName,
+            self.bps))
+
+    def restoreContext(self):
+        '''
+        '''
+        (self.pause,
+                self.nonstop,
+                self.tova,
+                self.silent,
+                self.runTil,
+                self.guiFuncGraphName,
+                self.bps) = self.ctxStack.pop()
 
     def getKernel(self):
         '''
@@ -2943,7 +2976,7 @@ class TestEmulator:
         self.nonstop = 0
         self.tova = None
 
-    def runStep(self, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None):
+    def runStep(self, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, bps=()):
         '''
         runStep is the core "debugging" functionality for this emulation-helper.  it's goal is to 
         provide a single-step interface somewhat like what you might get from a GDB experience.  
@@ -3002,6 +3035,8 @@ class TestEmulator:
                 strlen
         
         '''
+        self.storeContext()
+
         emu = self.emu
         self._follow = follow
         self.pause = pause
@@ -3015,6 +3050,10 @@ class TestEmulator:
         else:
             print("tracedict entries for %r" % (','.join([hex(key) for key in tracedict.keys() if type(key) == int])))
 
+
+        # if we provide new breakpoints, use them instead.  this is dangerous.  maybe not make these fields, but local tuple?
+        if bps:
+            self.bps = bps
 
         self.nonstop = 0
         self.tova = None
@@ -3038,6 +3077,9 @@ class TestEmulator:
                     if not self.silent:
                         print("PC reached 0x%x." % pc)
                     break
+
+                if pc in self.bps:
+                    self.resetNonstop()
 
                 op = emu.parseOpcode(pc)
                 self.op = op    # store it for later in case of post-mortem
@@ -3317,6 +3359,7 @@ class TestEmulator:
                 if self.quit:
                     print("Quitting!")
                     self.printStats(i)
+                    self.restoreContext()
                     return
 
                 if self.moveon:
@@ -3397,6 +3440,7 @@ class TestEmulator:
 
         if not self.silent:
             self.printStats(i)
+        self.restoreContext()
 
     def handleBranch(self, op, skip, skipop):
         '''
@@ -3451,6 +3495,7 @@ class TestEmulator:
             if hasattr(emu, 'curpath'):
                 vg_path.getNodeProp(emu.curpath, 'valist').append(starteip)
             skip = True
+
         return skip, skipop
 
     def dbgprint(self, *args, **kwargs):
