@@ -522,10 +522,10 @@ def strcmp(emu, op=None):
 
     if data1len != data2len:
         failed = True
-        data1 += '\0'
-        data2 += '\0'
+        data1 += b'\0'
+        data2 += b'\0'
 
-    for idx in min(data1len, data2len):
+    for idx in range(min(data1len, data2len)):
         if data1[idx] != data2[idx]:
             failed = True
             break
@@ -533,6 +533,33 @@ def strcmp(emu, op=None):
     retval = data2[idx] - data1[idx]
     if failed:
         print("strcmp failed: %d" % retval)
+
+    cconv.execCallReturn(emu, retval, 0)
+    return retval
+
+def strncmp(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    start1, start2, count = cconv.getCallArgs(emu, 3)
+    data1 = readString(emu, start1)[:count]
+    data2 = readString(emu, start2)[:count]
+    print("strncmp(%r, %r, %r)" % (data1, data2, count))
+    data1len = len(data1)
+    data2len = len(data2)
+    failed = False
+
+    if data1len != data2len:
+        failed = True
+        data1 += b'\0'
+        data2 += b'\0'
+
+    for idx in range(min(data1len, data2len)):
+        if data1[idx] != data2[idx]:
+            failed = True
+            break
+    
+    retval = data2[idx] - data1[idx]
+    if failed:
+        print("strncmp failed: %d" % retval)
 
     cconv.execCallReturn(emu, retval, 0)
     return retval
@@ -1843,6 +1870,7 @@ import_map = {
         '*.realloc': realloc,
         '*.strlen': strlen,
         '*.strcmp': strcmp,
+        '*.strncmp': strncmp,
         '*.strcat': strcat,
         '*.strcpy': strcpy,
         '*.strncpy': strncpy,
@@ -1899,6 +1927,7 @@ import_map = {
         'msvcr100.strncat_s': strncat_s,
         'msvcr100.strtok_s': strtok_s,
         'msvcr100.strrchr': strrchr,
+        'msvcr100.strncmp': strncmp,
         'msvcr100.free': free,
         'msvcr100._initterm': _initterm,
         'msvcr100._initterm_e': _initterm_e,
