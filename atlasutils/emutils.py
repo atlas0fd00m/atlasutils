@@ -1034,7 +1034,7 @@ def isspace(emu, op=None):
     c, = cconv.getCallArgs(emu, 1)
     print("isspace(0x%x)" % (c))
 
-    retval = (c in (0x9, 0xd, 0x20))
+    retval = (c in (0x9, 0xa, 0xb, 0xc, 0xd, 0x20))
 
     cconv.execCallReturn(emu, retval, 4)
 
