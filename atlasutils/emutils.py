@@ -359,7 +359,17 @@ def memcpy_s(emu, op=None):
     data = emu.readMemory(src, length)
     emu.writeMemory(dest, data)
     print(data)
-    cconv.execCallReturn(emu, dest, 0)
+    cconv.execCallReturn(emu, 0, 0) # 0 on success
+
+    return data
+
+def memmove_s(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    dest, numelements, src, count = cconv.getCallArgs(emu, 4)
+    data = emu.readMemory(src, count)
+    emu.writeMemory(dest, data)
+    print(data)
+    cconv.execCallReturn(emu, 0, 0) # 0 on success
 
     return data
 
@@ -485,6 +495,36 @@ def strtok_s(emu, op=None):
         retval = 0
         print("strtok_s() -> end")
 
+    cconv.execCallReturn(emu, retval, 0)
+    return retval
+
+def strstr(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cstr, srchstr = cconv.getCallArgs(emu, 2)
+    initial = readString(emu, cstr)
+    searchstr = emu.readMemString(srchstr)
+
+    idx = initial.find(searchstr)
+    if idx == -1:
+        retval = 0
+    else:
+        retval = cstr + idx
+    
+    print("strstr(%r, %r)" % (initial, searchstr))
+    cconv.execCallReturn(emu, retval, 0)
+    return retval
+
+def strchr(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    cstr, char = cconv.getCallArgs(emu, 2)
+    initial = readString(emu, cstr)
+    idx = initial.find(char)
+    if idx == -1:
+        retval = 0
+    else:
+        retval = cstr + idx
+    
+    print("strchr(%r, %r)" % (initial, char))
     cconv.execCallReturn(emu, retval, 0)
     return retval
 
@@ -1869,6 +1909,8 @@ import_map = {
         '*.free': free,
         '*.realloc': realloc,
         '*.strlen': strlen,
+        '*.strstr': strstr,
+        '*.strchr': strchr,
         '*.strcmp': strcmp,
         '*.strncmp': strncmp,
         '*.strcat': strcat,
@@ -1878,6 +1920,7 @@ import_map = {
         '*.strdup': strdup,
         '*.memcpy': memcpy,
         '*.memcpy_s': memcpy_s,
+        '*.memmove_s': memmove_s,
         '*.memset': memset,
         'kernel32.Sleep': Sleep,
         'kernel32.HeapAlloc': HeapAlloc,
@@ -1926,6 +1969,11 @@ import_map = {
         'msvcr100.strncpy_s': strncpy_s,
         'msvcr100.strncat_s': strncat_s,
         'msvcr100.strtok_s': strtok_s,
+        'msvcr100.strstr': strstr,
+        'msvcr100.memcpy': memcpy,
+        'msvcr100.memcpy_s': memcpy_s,
+        'msvcr100.memmove_S': memmove_s,
+        'msvcr100.strchr': strchr,
         'msvcr100.strrchr': strrchr,
         'msvcr100.strncmp': strncmp,
         'msvcr100.free': free,
