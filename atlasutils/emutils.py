@@ -339,16 +339,18 @@ def memset(emu, op=None):
 
     data = (b'%c' % char) * count
     emu.writeMemory(dest, data)
-    print(data)
+    print("memset(%r, %r, %r) => %r" % (dest, char, count, data))
     cconv.execCallReturn(emu, 0, 0)
     return data
 
 def memcpy(emu, op=None):
     ccname, cconv = getLibcCallConv(emu)
     dest, src, length = cconv.getCallArgs(emu, 3)
+
     data = emu.readMemory(src, length)
     emu.writeMemory(dest, data)
-    print(data)
+    print("memcpy(0x%x, 0x%x, 0x%x) => %r" % (dest, src, length, data))
+
     cconv.execCallReturn(emu, dest, 0)
 
     return data
@@ -1116,6 +1118,7 @@ class FakeFile:
         self._filenum = None
         self.closed = False
         self.data = data
+        self.mode = mode
         self.off = off
 
     def close(self):
@@ -1218,11 +1221,11 @@ def findInternalPath(kernel, libFileName, casein=False, matchFnOnly=True):
 
     raise FileNotFoundError(libFileName)
 
-def findExtPath(filepath, libFileName, casein=False, kernel=None, matchFnOnly=True):
+def findExtPath(pathmaps, libFileName, casein=False, kernel=None, matchFnOnly=True):
     '''
     helper function to dig through paths and find a file
 
-    filepath is a list of directories
+    pathmaps is a list of directory tuples (realpath, fakepath) to map fake FS to real
     libFileName is a filename we're looking for
     casein means filenames are not case-sensitive.
     matchFnOnly means we're searching for a File.  Otherwise, we're matching an exact path
@@ -1242,7 +1245,7 @@ def findExtPath(filepath, libFileName, casein=False, kernel=None, matchFnOnly=Tr
 
     ulibFileName = libFileName.upper()
 
-    for pathpart, fakepart in filepath:
+    for pathpart, fakepart in pathmaps:
         for fname in os.listdir(pathpart):
             if matchFnOnly:
                 f = fname
@@ -1302,7 +1305,6 @@ def LoadLibraryExA(emu, op=None):
                 print("Map loaded...")
                 # register with the Kernel that we're loading (in the future, more LoadLibrary functionality may move there)
                 kernel.loadLibrary(result, normfn)
-
                 break
 
             except ExpressionFail as e:
@@ -1311,7 +1313,7 @@ def LoadLibraryExA(emu, op=None):
                 # we must load it
            
             try:
-                filepath = findExtPath(emu.temu.filepath, libFileName, kernel=kernel)
+                filepath = findExtPath(kernel.pathmaps, libFileName, kernel=kernel)
                 if not filepath:
                     filepath = input("PLEASE ENTER THE PATH FOR (%r) or 'None': " % libFileName)
                     if filepath == "None":
@@ -1344,7 +1346,7 @@ def LoadLibraryExA(emu, op=None):
                 print(e)
 
         # run Library Init routine (__entry)
-        ret = emu.readMemoryPtr(emu.getStackCounter())  # FIXME: this only works on archs where RET is pushed to the stack
+        ret = emu.readMemoryPtr(emu.getStackCounter())  # FIXME: rework using cconv: this only works on archs where RET is pushed to the stack
         init = emu.vw.parseExpression(normfn + ".__entry")
 
         if init:
@@ -1403,22 +1405,36 @@ def GetModuleFileNameA(emu, op=None):
     hModule, lpFilename, nSize = cconv.getCallArgs(emu, 3)
     print("GetModuleFilenameA(0x%x, 0x%x, 0x%x)" % (hModule, lpFilename, nSize))
 
-    if hModule:
-        curname = emu.vw.getFileByVa(hModule).encode('utf8')
-        curname += b'.dll'
-    else:
-        curname = b"Filename.exe"
-    print("GetModuleFileNameA(%r)" % curname)
+    filepath = kernel.getFilePathByVa(hModule)
+    print("GetModuleFileNameA map: %r" % (filepath))
+    print(kernel.filepathmap)
 
-    # search internal data structures for this module's path
-    print("kernel: %r" % kernel)
-    filepath = findInternalPath(kernel, curname, casein=True)
-
-    # if we don't find it internally, check the filesystem(s) mapped in through the "kernel"
     if not filepath:
-        filepath = findExtPath(emu.temu.filepath, curname, casein=True, kernel=kernel)
+        if hModule:
+            curname = emu.vw.getFileByVa(hModule).encode('utf8')
+            curname += b'.dll'
+        else:
+            curname = b"Filename.exe"
 
-    print("GetModuleFileNameA() -> %r" % filepath)
+        print("GetModuleFileNameA(%r)" % curname)
+
+        # search internal data structures for this module's path
+        print("kernel: %r" % kernel)
+
+        if not filepath:
+            try:
+                filepath = findInternalPath(kernel, curname, casein=True)
+            except FileNotFoundError:
+                pass
+
+        # if we don't find it internally, check the filesystem(s) mapped in through the "kernel"
+        if not filepath:
+            try:
+                filepath, realpath = findExtPath(kernel.pathmaps, curname, casein=True, kernel=kernel)
+            except FileNotFoundError:
+                pass
+
+    print("GetModuleFileNameA() -> %r" % repr(filepath))
 
     if filepath:
         curname = filepath
@@ -1835,7 +1851,8 @@ def getenv_s(emu, op=None):
         varname = varname.upper()
 
     # lookup the env var:
-    val = temu.environment.get(varname)
+    kernel = emu.getMeta('kernel')
+    val = kernel.environment.get(varname)
 
     # figure out how to return
     if not pRetVal:
@@ -2046,10 +2063,82 @@ class Kernel(dict):
         self.errno = 0
 
         # setup key files db here
+        self.pathmaps = kwargs.get('pathmaps', [])
+        self.filepathmap = kwargs.get('filepathmap', {})
         self.fs = kwargs.get('fs', collections.defaultdict(dict))    # perhaps create file objects, for now this.
         self.fhandles = kwargs.get('fhandles', {})   # store a connection between a handle and a member of 'fs'
+        self.environment = kwargs.get('environment', {})
         # File Descriptors
         self.fds = [sys.stdin, sys.stdout, sys.stderr]
+
+        self._syscall_handlers = {}
+        self._syscall_handlers.update(kwargs.get('syscall_handlers', {}))
+
+    def addDirectory(self, dirpath, attrib=0):
+        '''
+        Add a directory to the Fake Filesystem.
+        Sometimes necessary, sometimes not.
+
+        Currently uses Win32 attributes
+        '''
+        if type(dirpath) == str:
+            dirpath = dirpath.encode('utf-8')
+
+        attrib |= win32const.FILE_ATTRIBUTE_DIRECTORY
+        self.fs[dirpath] = (attrib, None)
+
+    def addFile(self, fname, data=b'', attrib=0):
+        '''
+        Add a file to the Fake Filesystem.
+        This file may be changed, but changes won't persist without additional
+        work on your part.  This is very handy when you don't want any part of
+        your filesystem exposed, as with directory mapping.
+
+        Currently uses Win32 attributes
+        '''
+        if type(fname) == str:
+            fname = fname.encode('utf-8')
+
+        if not attrib:
+            attrib = FILE_ATTRIB_DEFAULT
+        else:
+            attrib |= win32const.FILE_ATTRIBUTE_NORMAL
+
+        self.fs[fname] = (attrib, data)
+
+    def addDirectoryMap(self, fakepath, realpath):  # TODO: make per-map permissions
+        '''
+        Map a real directory into the emulator with a fake path.
+
+        Files accessed using this map by supporting call_handlers (eg. fopen)
+        will attempt to access *real* files and directories in your filesystem.
+
+        Filesystem Access Policy can be set using setFsPolicy, including if
+        a failed policy still prompts the user for access.  If set, you can
+        neither accept nor deny access without specifically typing "Y" or "N"
+        as the only acceptable response.
+
+        In the future, per-map permissions will be included
+        '''
+        if type(fakepath) == str:
+            fakepath = fakepath.encode('utf-8')
+
+        if type(realpath) == str:
+            realpath = realpath.encode('utf-8')
+
+        self.pathmaps.append((realpath, fakepath))
+
+    def addEnvVar(self, name, valstr):
+        '''
+        Add Environment Variables pertinent to your project
+        '''
+        if type(name) == str:
+            name = name.encode('utf-8')
+
+        if type(valstr) == str:
+            valstr = valstr.encode('utf-8')
+
+        self.environment[name] = valstr
 
     def setFsPolicy(self, fs_policy=0, prompt=True):
         '''
@@ -2074,6 +2163,23 @@ class Kernel(dict):
         fd._filenum = len(self.fds)     
         self.fds.append(fd)
         return fd._filenum
+
+    def addFilePathMapping(self, va, filepath):
+        '''
+        Allows the direct control of what filename is associated with a given 
+        VA.  This should typically be the image base VA, not just random VAs.
+        '''
+        if type(filepath) == str:
+            filepath = filepath.encode('utf-8')
+
+        self.filepathmap[va] = filepath
+
+    def getFilePathByVa(self, va):
+        '''
+        Returns the mapping of filepath to image base VA, or None if no such
+        mapping exists.
+        '''
+        return self.filepathmap.get(va)
 
     def openInternalFile(self, libFileName, mode):
         '''
@@ -2115,9 +2221,9 @@ class Kernel(dict):
         if not 'b' in mode:
             mode = 'b' + mode
 
-        filepath = self.emu.temu.filepath
+        pathmaps = self.pathmaps
         print("Attempting to open external file: %r")
-        fakepath, realpath = findExtPath(filepath, libFilePath, not self.isFsCaseSensitive(), kernel=self, matchFnOnly=False)
+        fakepath, realpath = findExtPath(pathmaps, libFilePath, not self.isFsCaseSensitive(), kernel=self, matchFnOnly=False)
         realfile = open(realpath, mode)
         retval = self.registerFd(realfile)
 
@@ -2135,23 +2241,44 @@ class Kernel(dict):
         retval = None
         try:
             return self.openInternalFile(filename, mode)
-            #retval, myfile = self.openInternalFile(filename, mode)
-            #return retval, myfile
 
         except FileNotFoundError:
             # not an internal file... but we need to check the mappings
             pass
         
         ## next check the mapped in filesystem
-        # FIXME: in the future: move filepath and all file stuffs into the Kernel
         return self.openExtFile(filename, mode)
-        #retval, myfile = self.openExtFile(filename, mode)
-        #return retval, myfile
 
+    def op_sysenter(self, emu, op):
+        # handle select Kernel syscalls
+        callnum = emu.getRegister(0)
+        syscall = self._syscall_handlers.get(callnum)
+        if syscall is not None:
+            syscall(emu, op)
+
+        else:
+            raise SystemCallNotImplemented(callnum, emu, op)
+
+
+class RawKernel(Kernel):
+    pass
 
 class WinKernel(Kernel):
     sep = b'\\'
     def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False, **kwargs):
+        # actual syscall handlers
+        win7_syscalls = {    # worked up on Win7-32
+            0xd9: self.sys_win_NtQueryAttributesFile,  # ntdll.ntQueryAttributesFile
+            0xdc: self.sys_win_DbgQueryDebugFilterState,  # ntdll.DbgQueryDebugFilterState
+            0xb3: self.sys_win_NtOpenFile,
+            0x54: self.sys_win_NtCreateSection,
+            0xa8: self.sys_win_MapViewOfSection,
+        }
+
+        if 'syscall_handlers' in kwargs:
+            win7_syscalls.update(kwargs['syscall_handlers'])
+
+        kwargs['syscall_handlers'] = win7_syscalls
         Kernel.__init__(self, emu, **kwargs)
 
         if syswow:
@@ -2182,14 +2309,6 @@ class WinKernel(Kernel):
         except ImportError as e:
             print("error importing VStructs for Windows %d.%d_%s: %r" % (vermaj, vermin, arch, e))
         
-        # actual syscall handlers
-        self.win_syscalls = {    # worked up on Win7-32
-            0xd9: self.sys_win_NtQueryAttributesFile,  # ntdll.ntQueryAttributesFile
-            0xdc: self.sys_win_DbgQueryDebugFilterState,  # ntdll.DbgQueryDebugFilterState
-            0xb3: self.sys_win_NtOpenFile,
-            0x54: self.sys_win_NtCreateSection,
-            0xa8: self.sys_win_MapViewOfSection,
-            }
 
     def isFsCaseSensitive(self):
         return False
@@ -2294,16 +2413,6 @@ class WinKernel(Kernel):
         self.teb.LastErrorValue = last_error
         self.emu.writeMemory(self.tebbase, self.teb.vsEmit())
         return self.teb.ClientId.UniqueProcess
-
-    def op_sysenter(self, emu, op):
-        # handle select Windows syscalls
-        callnum = emu.getRegister(0)
-        syscall = self.win_syscalls.get(callnum)
-        if syscall is not None:
-            syscall(emu, op)
-
-        else:
-            raise SystemCallNotImplemented(callnum, emu, op)
 
     def sys_win_DbgQueryDebugFilterState(self, emu, op):
         stackDump(emu)
@@ -2512,25 +2621,8 @@ class LinuxKernel(Kernel):
         else:
             self.emu.setSegmentInfo(e_i386.SEG_GS, self.tlsbase, TLSSZ)
 
-        # actual syscall handlers
-        lin_syscalls = {
-        }
-
-
     def isFsCaseSensitive(self):
         return True
-
-    def op_sysenter(krnl, emu, op):
-        # handle select Linux syscalls
-        callnum = emu.getRegister(0)
-        syscall = krnl.lin_syscalls.get(callnum)
-        if syscall is not None:
-            syscall(emu, op)
-
-        else:
-            raise SystemCallNotImplemented(callnum, emu, op)
-
-
 
 
 def backTrace(emu):
@@ -2708,8 +2800,14 @@ class TestEmulator:
         fakePEB -   set up fake PEB/TEB memoryspaces and setup the appropriate segment
         guiFuncGraphName - name of the gui window to send location info to (nav info)
         hookbyname - should we 
-        filepath -  path for finding binaries (for emufuncs like LoadLibraryExA), just 
-                    like current OS pathing.
+
+        Kernel object also shares **kwargs:
+            pathmaps
+            filepathmap
+            fs
+            fhandles
+            environment
+            syscall_handlers
         '''
         self.vw = None
         self.vwg = None
@@ -2730,9 +2828,9 @@ class TestEmulator:
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
-        self.environment = {}
-        self.fs = {}
-        self.filepath = kwargs.get('filepath', [])
+        #self.environment = {}
+        #self.fs = {}
+        #self.pathmaps = kwargs.get('pathmaps', [])
         self.bps = kwargs.get('bps', ())
 
         self.ctxStack = []
@@ -2752,14 +2850,88 @@ class TestEmulator:
 
         plat = emu.vw.getMeta('Platform')
         if plat.startswith('win'):
-            kernel = WinKernel(emu, fs=self.fs, filepath=self.filepath)
-        #elif plat.startswith('linux') or plat:
+            kernel = WinKernel(emu, **kwargs)
+
+        elif plat.startswith('unknown'):
+            kernel = RawKernel(emu, **kwargs)
+
         else:   # FIXME: need to make Elf identification better!!
-            kernel = LinuxKernel(emu, fs=self.fs, filepath=self.filepath)
+            kernel = LinuxKernel(emu, **kwargs)
 
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
 
+    def addDirectory(self, dirpath, attrib=0):
+        '''
+        Add a directory to the Fake Filesystem.
+        Sometimes necessary, sometimes not.
+
+        Currently uses Win32 attributes
+        (calls same function in the kernel object)
+        '''
+        kernel = self.getKernel()
+        return kernel.addDirectory(dirpath, attrib)
+
+    def addFile(self, fname, data=b'', attrib=0):
+        '''
+        Add a file to the Fake Filesystem.
+        This file may be changed, but changes won't persist without additional
+        work on your part.  This is very handy when you don't want any part of
+        your filesystem exposed, as with directory mapping.
+
+        Currently uses Win32 attributes
+        (calls same function in the kernel object)
+        '''
+        kernel = self.getKernel()
+        return kernel.addFile(fname, data=data, attrib=attrib)
+
+    def addDirectoryMap(self, fakepath, realpath):  # TODO: make per-map permissions
+        '''
+        Map a real directory into the emulator with a fake path.
+
+        Files accessed using this map by supporting call_handlers (eg. fopen)
+        will attempt to access *real* files and directories in your filesystem.
+
+        Filesystem Access Policy can be set using setFsPolicy, including if
+        a failed policy still prompts the user for access.  If set, you can
+        neither accept nor deny access without specifically typing "Y" or "N"
+        as the only acceptable response.
+
+        In the future, per-map permissions will be included
+        (calls same function in the kernel object)
+        '''
+        kernel = self.getKernel()
+        return kernel.addDirectoryMap(fakepath, realpath)
+
+    def addEnvVar(self, name, valstr):
+        '''
+        Add Environment Variables pertinent to your project
+        (calls same function in the kernel object)
+        '''
+        kernel = self.getKernel()
+        return kernel.addEnvVar(name, valstr)
+
+
+    def setFsPolicy(self, fs_policy=0, prompt=True):
+        '''
+        FileSystem policy indicates what level of permissions this emulator 
+        has to read/write/exec in the filesystem.  If fs_policy is loose 
+        (eg. MM_READ|MM_WRITE|MM_EXEC), the emulator can read/write/execute 
+        without prompting the user.  If the required permissions are not
+        allowed (default fs_policy is 0, aka.  nothing), the user is prompted,
+        and *no default* is used.  The user must reply with "Y" or "N".  This
+        is to ensure you are aware of what impact you are having.
+
+        If you *don't* want to be prompted (some use-cases this makes sense),
+        set prompt to False.
+        (calls same function in the kernel object)
+        '''
+        kernel = self.getKernel()
+        return kernel.setFsPolicy(fs_policy=fs_policy, prompt=prompt)
+
+    def addFilePathMapping(self, va, filepath):
+        kernel = self.getKernel()
+        return kernel.addFilePathMapping(va, filepath)
 
     def storeContext(self):
         '''
@@ -3682,7 +3854,7 @@ def readMemString(self, va, maxlen=0xfffffff, wide=False):
 import vivisect.impemu.monitor as vi_mon
 import vivisect.symboliks.analysis as vs_anal
 
-class SymbolikTraceAnalMod(vi_mon.AnalysisMonitor):
+class SymbolikTraceAnalMon(vi_mon.AnalysisMonitor):
     def __init__(self, emu):
         self.emu = emu
         self.sctx = vs_anal.getSymbolikAnalysContext(emu.vw)
@@ -3690,6 +3862,45 @@ class SymbolikTraceAnalMod(vi_mon.AnalysisMonitor):
 
     def prehook(self, emu, op, starteip):
         self.xlate.translateOp(op)
+
+class CallRetMonitor(vi_mon.AnalysisMonitor):
+    def __init__(self, emu):
+        self.emu = emu
+        self.rets = collections.defaultdict(int)
+        self.calls = collections.defaultdict(int)
+
+    def prehook(self, emu, op, starteip):
+        if op.isCall():
+            self.calls[starteip] += 1
+
+        elif op.iflags & envi.IF_RET:
+            self.rets[starteip] += 1
+
+    def __repr__(self):
+        rlen = len(self.rets)
+        clen = len(self.calls)
+        out = ["Number of unique Calls: %d    and Returns: %d" % (clen, rlen)]
+
+        tempcalls = [(count, va) for va, count in self.calls.items()]
+        tempcalls.sort()
+        
+        out.append("Top 20 calls:")
+        for x in range(clen-1, max(clen-21, 0), -1):
+            count, va = tempcalls[x]
+            name = self.emu.vw.getName(va)
+            out.append("  0x%x (%r):  %d" % (va, name, count))
+
+        temprets = [(count, va) for va, count in self.rets.items()]
+        temprets.sort()
+        
+        out.append("Top 20 calls:")
+        for x in range(rlen-1, max(rlen-21, 0), -1):
+            count, va = temprets[x]
+            name = self.emu.vw.getName(va)
+            out.append("  0x%x (%r):  %d" % (va, name, count))
+
+        return '\n'.join(out)
+
 
 def insertComment(vw, va, comment):
     curcmt = vw.getComment(va)
