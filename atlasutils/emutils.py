@@ -7,6 +7,7 @@ import psutil
 import struct
 import struct
 import vtrace
+import platform
 import traceback
 import collections
 
@@ -22,12 +23,19 @@ import envi.archs.amd64 as e_amd64
 import vivisect
 import vivisect.cli as viv_cli
 import visgraph.pathcore as vg_path
+
+import vivisect.impemu.monitor as vi_mon
+import vivisect.symboliks.analysis as vs_anal
+
 from binascii import hexlify, unhexlify
 
 from atlasutils.errno import *
 from envi.expression import ExpressionFail
 
 from envi.const import MM_READ, MM_WRITE, MM_EXEC
+
+# TODO: break into modules  (eg.  emuwin, emulin, emuraw)
+# TODO: group emulated functions into classes
 
 SNAP_NORM = 0
 SNAP_CAP = 1
@@ -37,6 +45,16 @@ SNAP_SWAP = 3
 PEBSZ = 4096
 TEBSZ = 4096
 TLSSZ = 4096
+
+def doBytes(bytes_or_str):
+    '''
+    Make sure you're working with a bytes object
+    bytes_or_str may be a bytes or a str object,
+    either way we return bytes
+    '''
+    if type(bytes_or_str) == str:
+        return bytes_or_str.encode('utf-8')
+    return bytes_or_str
 
 def parseExpression(emu, expr, lcls={}):
     '''
@@ -49,8 +67,7 @@ def parseExpression(emu, expr, lcls={}):
         lcls.update(emu.getRegisterContext().getRegisters())
     return e_expr.evaluate(expr, lcls)
 
-import vivisect.impemu.monitor as v_i_monitor
-class TraceMonitor(v_i_monitor.AnalysisMonitor):
+class TraceMonitor(vi_mon.AnalysisMonitor):
     def __init__(self, traces=None):
         if traces is None:
             traces = {}
@@ -1039,7 +1056,6 @@ def fopen(emu, op=None):
 
         except:
             print("fopen:  unhandled exception:")
-            import traceback
             traceback.print_exc()
             uinp = input("Press Enter to Continue or 'q' to quit ")
             if uinp.startswith('q'):
@@ -1368,7 +1384,6 @@ def LoadLibraryExA(emu, op=None):
         else:
             print("No Library Init found, just returning")
 
-    #import envi.interactive as ei; ei.dbg_interact(locals(), globals())
     cconv.execCallReturn(emu, result, 3)
 
 DLL_PROCESS_DETACH = 0
@@ -1408,6 +1423,8 @@ def GetModuleFileNameA(emu, op=None):
     filepath = kernel.getFilePathByVa(hModule)
     print("GetModuleFileNameA map: %r" % (filepath))
     print(kernel.filepathmap)
+
+    # TODO:  push upstream to include "OrigFilename" to FileMeta
 
     if not filepath:
         if hModule:
@@ -1527,7 +1544,13 @@ def WaitForSingleObject(emu, op=None):
 
         emu.writeMemory(hHandle, mutdata)
 
-    input()
+    # user interface
+    if emu.getMeta('WaitPause'):    # this is ugly and in need of documentation or paradigm def
+        uinp = input("'q' to stop nonstop")
+        print("saw this: %r" % uinp.lower())
+        if uinp.lower().startswith('q'):
+            print("RESETTING NONSTOP MODE")
+            emu.temu.resetNonstop()
     
     # TODO: roll through supported object types and check/reserve them
     # Mutexes from the WinKernel
@@ -2074,6 +2097,9 @@ class Kernel(dict):
         self._syscall_handlers = {}
         self._syscall_handlers.update(kwargs.get('syscall_handlers', {}))
 
+    def _convertEnvName(self, varname):
+        return varname
+
     def addDirectory(self, dirpath, attrib=0):
         '''
         Add a directory to the Fake Filesystem.
@@ -2081,11 +2107,8 @@ class Kernel(dict):
 
         Currently uses Win32 attributes
         '''
-        if type(dirpath) == str:
-            dirpath = dirpath.encode('utf-8')
-
         attrib |= win32const.FILE_ATTRIBUTE_DIRECTORY
-        self.fs[dirpath] = (attrib, None)
+        self.fs[doBytes(dirpath)] = (attrib, None)
 
     def addFile(self, fname, data=b'', attrib=0):
         '''
@@ -2096,15 +2119,12 @@ class Kernel(dict):
 
         Currently uses Win32 attributes
         '''
-        if type(fname) == str:
-            fname = fname.encode('utf-8')
-
         if not attrib:
             attrib = FILE_ATTRIB_DEFAULT
         else:
             attrib |= win32const.FILE_ATTRIBUTE_NORMAL
 
-        self.fs[fname] = (attrib, data)
+        self.fs[doBytes(fname)] = (attrib, data)
 
     def addDirectoryMap(self, fakepath, realpath):  # TODO: make per-map permissions
         '''
@@ -2120,25 +2140,32 @@ class Kernel(dict):
 
         In the future, per-map permissions will be included
         '''
-        if type(fakepath) == str:
-            fakepath = fakepath.encode('utf-8')
-
-        if type(realpath) == str:
-            realpath = realpath.encode('utf-8')
-
-        self.pathmaps.append((realpath, fakepath))
+        self.pathmaps.append((doBytes(realpath), doBytes(fakepath)))
 
     def addEnvVar(self, name, valstr):
         '''
         Add Environment Variables pertinent to your project
         '''
-        if type(name) == str:
-            name = name.encode('utf-8')
+        name = doBytes(name)
+        varname = self._convertEnvName(name)
+        self.environment[varname] = doBytes(valstr)
 
-        if type(valstr) == str:
-            valstr = valstr.encode('utf-8')
+    def getEnvVar(self, name):
+        '''
+        Get Environment Variable
+        '''
+        name = doBytes(name)
+        varname = self._convertEnvName(name)
+        return self.environment.get(varname)
 
-        self.environment[name] = valstr
+    def delEnvVar(self, name):
+        '''
+        Remove Environment Variable
+        '''
+        name = doBytes(name)
+        varname = self._convertEnvName(name)
+        if varname in self.environment:
+            return self.environment.pop(varname)
 
     def setFsPolicy(self, fs_policy=0, prompt=True):
         '''
@@ -2210,7 +2237,7 @@ class Kernel(dict):
 
     def openExtFile(self, libFilePath, mode):
         '''
-        Return an external file based on filepath mapping.
+        Return an external file based on pathmaps mapping.
         libFilePath is a full path
 
         bytes() not str()
@@ -2701,8 +2728,6 @@ def heapDump(emu):
     heap = getHeap(emu)
     print(heap.dump())
 
-import envi
-import platform
 def getWindowsDef(normname='ntdll', arch='i386', wver='6.1.7601', syswow=False):
     '''
     Get the correct set of Windows VStructs
@@ -2828,9 +2853,6 @@ class TestEmulator:
         self.XWsnapshot = {}
         self.cached_mem_locs = []
         self.call_handlers = {}
-        #self.environment = {}
-        #self.fs = {}
-        #self.pathmaps = kwargs.get('pathmaps', [])
         self.bps = kwargs.get('bps', ())
 
         self.ctxStack = []
@@ -3374,7 +3396,6 @@ class TestEmulator:
                         self.printMemStatus(op)
                     except Exception as e:
                         print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
-                        import traceback
                         traceback.print_exc()
 
                     print("Step: %s" % i)
@@ -3595,11 +3616,9 @@ class TestEmulator:
                                         else:
                                             print(out)
                                     except:
-                                        import sys
                                         sys.excepthook(*sys.exc_info())
 
                             except:
-                                import traceback
                                 traceback.print_exc()
 
                             #self.printStats(i)
@@ -3642,7 +3661,6 @@ class TestEmulator:
                             emu.setProgramCounter(newpc)
 
                         else:
-                            import sys
                             sys.excepthook(*sys.exc_info())
                             break
 
@@ -3657,7 +3675,6 @@ class TestEmulator:
                             self.printMemStatus(op, use_cached=True)
                         except Exception as e:
                             print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
-                            import sys
                             sys.excepthook(*sys.exc_info())
 
                 # unless we've asked to skip the instruction...
@@ -3667,8 +3684,7 @@ class TestEmulator:
 
             except KeyboardInterrupt:
                 self.printStats(i)
-                self.nonstop = 0
-                self.pause = True
+                self.resetNonstop()
                 break
 
             except envi.SegmentationViolation:
@@ -3677,14 +3693,16 @@ class TestEmulator:
                 if op.isCall() or op.iflags & envi.IF_BRANCH and taint:
                     skip, skipop = self.handleBranch(op, skip, skipop)
                 else:
-                    import sys
                     sys.excepthook(*sys.exc_info())
+                    print("Exception at instruction #%d" % i)
+                    self.resetNonstop()
+                    self.printStats(i)
                     break
 
             except:
-                self.nonstop = 0
-                self.pause = True
-                import sys
+                print("Exception at instruction #%d" % i)
+                self.printStats(i)
+                self.resetNonstop()
                 sys.excepthook(*sys.exc_info())
 
         if not self.silent:
@@ -3850,9 +3868,6 @@ def readMemString(self, va, maxlen=0xfffffff, wide=False):
     raise envi.SegmentationViolation(va)
 
 
-
-import vivisect.impemu.monitor as vi_mon
-import vivisect.symboliks.analysis as vs_anal
 
 class SymbolikTraceAnalMon(vi_mon.AnalysisMonitor):
     def __init__(self, emu):
