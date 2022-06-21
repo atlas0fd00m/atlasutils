@@ -2400,6 +2400,7 @@ reg_hives = { v: k for k, v in globals().items() if k.startswith("REG_HIVE_HK") 
      
 class Win32Registry(e_config.EnviConfig):
     def __init__(self, filename=None, defaults=None, docs=None, autosave=False, conjbyte='\\'):
+        e_config.EnviConfig.__init__(self, filename, defaults, docs, autosave)
         self.conjbyte = conjbyte
         self.handles = []
         self.handlenum = itertools.count()
@@ -2423,12 +2424,12 @@ class Win32Registry(e_config.EnviConfig):
             cfgkeys = config.keys()
             if cfgkeys:
                 pathstr = self.conjbyte.join(path) + self.conjbyte
-                newpaths = [(CONFIG_ENTRY, "%s%s" % (pathstr, key), "%s" % (config[key])) for key in cfgkeys]
+                newpaths = [(e_config.CONFIG_ENTRY, "%s%s" % (pathstr, key), "%s" % (config[key])) for key in cfgkeys]
                 paths.extend(newpaths)
 
             subnames = config.getSubConfigNames()
             if not len(subnames):
-                paths.append((CONFIG_PATH, self.conjbyte.join(path), None))
+                paths.append((e_config.CONFIG_PATH, self.conjbyte.join(path), None))
                 continue
 
             for subname in subnames:
@@ -2745,6 +2746,10 @@ class WinKernel(Kernel):
         I can't imagine a time I'd want this to return True.... but we'll allow the WinKernel to 
         make that determination at some future time.  For now:  NO!
         '''
+        # let's dump some stack just because...  for individual investigations, may just want to pause here
+        # or do:
+        #import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+        stackDump(self.emu)
         return 0
 
     def sys_win_NtQueryAttributesFile(self, emu, op):
