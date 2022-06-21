@@ -1661,6 +1661,15 @@ def _unlock(emu, op=None):
 
     cconv.execCallReturn(emu, val, 0)
 
+def IsDebuggerPresent(emu, op=None):
+    ccname, cconv = getMSCallConv(emu, op.va)
+
+    kernel = emu.getMeta('kernel')
+    isdbg = kernel.IsDebuggerPresent()
+
+    cconv.execCallReturn(emu, isdbg, 0)
+
+
 
 def dupWorkspace(vw):
     newvw = viv_cli.VivCli()
@@ -2066,6 +2075,7 @@ import_map = {
         'kernel32.CloseHandle': CloseHandle,
         'kernel32.EncodePointer': EncodePointer,
         'kernel32.DecodePointer': DecodePointer,
+        'kernel32.IsDebuggerPresent': IsDebuggerPresent,
         'ntdll._vsnprintf': vsnprintf,
         'msvcr100._lock': _lock,
         'msvcr100._unlock': _unlock,
@@ -2729,6 +2739,13 @@ class WinKernel(Kernel):
         UNICODE_STRING.vsParse(emu.readMemory(addr, len(UNICODE_STRING)))
         return UNICODE_STRING
 
+
+    def IsDebuggerPresent(self):
+        '''
+        I can't imagine a time I'd want this to return True.... but we'll allow the WinKernel to 
+        make that determination at some future time.  For now:  NO!
+        '''
+        return 0
 
     def sys_win_NtQueryAttributesFile(self, emu, op):
         stackDump(emu)
