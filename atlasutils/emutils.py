@@ -8,12 +8,14 @@ import struct
 import struct
 import vtrace
 import platform
+import itertools
 import traceback
 import collections
 
 import envi
 import envi.exc as e_exc
 import envi.memory as e_m
+import envi.config as e_config
 import envi.expression as e_expr
 import envi.memcanvas as e_memcanvas
 
@@ -1123,6 +1125,40 @@ def isspace(emu, op=None):
 
     cconv.execCallReturn(emu, retval, 4)
 
+def RegOpenKeyExA(emu, op=None):
+    emu.temu.stackDump()
+    ccname, cconv = getMSCallConv(emu)
+    hkey, lpSubKey, ulopts, samDesired, phkResult = cconv.getCallArgs(emu, 5)
+    kernel = emu.getMeta('kernel')
+
+    hkeystr = emu.readMemString(hkey)
+    SubKeyStr = None
+    if lpSubKey:
+        if emu.isValidPointer(lpSubKey):
+            SubKeyStr = emu.readMemString(lpSubKey)
+        else:
+            print("RegOpenKeyExA: lpSubKey not NULL and not pointer: 0x%x" % lpSubKey)
+
+    handle = kernel.registry.RegOpenKey(hkeystr, SubKeyStr, ulopts, samDesired)
+    if handle:
+        emu.writeMemoryPtr(phkResult, handle)
+        retval = 0
+
+    else:
+        retval = win32const.ERROR_BADKEY
+
+    print("RegOpenKeyExA(%r, %r, 0x%x, 0x%x, 0x%x)" % (hkey, lpSubKey, ulopts, samDesired, phkResult))
+    cconv.execCallReturn(emu, retval, 5)
+    
+def RegQueryValueExA(emu, op=None):
+    ccname, cconv = getLibcCallConv(emu)
+    hKey, lpValueName, lpReserved, lpType, lpData, lpcbData = cconv.getCallArgs(emu, 6)
+
+    cconv.execCallReturn(emu, retval, 5)
+
+def RegCloseKey(emu, op=None):
+    pass
+
 
 class FakeFile:
     '''
@@ -1854,6 +1890,36 @@ def vsprintf_s(emu, op=None):
     cconv.execCallReturn(emu, result, 4)
    
 
+def getenv(emu, op=None):
+    '''
+    Get Environment Variables.... (unsecure model)
+    '''
+    ccname, cconv = getMSCallConv(emu, op.va)
+    varnameptr, = cconv.getCallArgs(emu, 1)
+
+    # grab some fake Environment variable string...
+    temu = emu.temu
+    vw = temu.vw
+    varname = temu.emu.readMemString(varnameptr)
+    print("getenv(%r)" % (varname))
+
+    # lookup the env var:
+    kernel = emu.getMeta('kernel')
+    valstr = kernel.getEnvVar(varname)
+
+    if valstr:
+        # we have a value...
+        # put it into the emulator's memory space
+        heap = getHeap(emu)
+        heapchunk = heap.malloc(len(valstr) + 1)
+
+        emu.writeMemory(heapchunk, valstr)
+        result = heapchunk
+    else:
+        result = 0
+
+    cconv.execCallReturn(emu, result, 0)
+
 def getenv_s(emu, op=None):
     '''
     Get Environment Variables....
@@ -2004,6 +2070,7 @@ import_map = {
         'msvcr100._lock': _lock,
         'msvcr100._unlock': _unlock,
         'msvcr100.__dllonexit': __dllonexit,
+        'msvcr100.getenv': getenv,
         'msvcr100.getenv_s': getenv_s,
         'msvcr100.calloc': calloc,
         'msvcr100.strncpy_s': strncpy_s,
@@ -2031,6 +2098,9 @@ import_map = {
         'msvcr100.fwrite': fwrite,
         'msvcr100.fclose': fclose,
         'msvcr100.isspace': isspace,
+        'advapi32.RegOpenKeyExA': RegOpenKeyExA,
+        'advapi32.RegQueryValueExA': RegQueryValueExA,
+        'advapi32.RegCloseKey': RegCloseKey,
         }
 
 
@@ -2060,6 +2130,23 @@ class win32const:
     SEM_NOALIGNMENTFAULTEXCEPT = 0x0004 # The system automatically fixes memory alignment faults and makes them invisible to the application. It does this for the calling process and any descendant processes. This feature is only supported by certain processor architectures. For more information, see SetErrorMode.
     SEM_NOGPFAULTERRORBOX = 0x0002  # The system does not display the Windows Error Reporting dialog.
     SEM_NOOPENFILEERRORBOX = 0x8000 # The system does not display a message box when it fails to find a file. Instead, the error is returned to the calling process.
+
+    ERROR_NO_TOKEN = 0x3F0 # An attempt was made to reference a token that does not exist.  
+    ERROR_BADDB = 0x3F1 # The configuration registry database is corrupt.  
+    ERROR_BADKEY = 0x3F2 # The configuration registry key is invalid.
+
+    ERROR_CANTOPEN = 0x3F3 # The configuration registry key could not be opened.
+
+    ERROR_CANTREAD = 0x3F4 # The configuration registry key could not be read.  
+    ERROR_CANTWRITE = 0x3F5 # The configuration registry key could not be written.  
+    ERROR_REGISTRY_RECOVERED = 0x3F6 # One of the files in the registry database had to be recovered by use of a log or alternate copy. The recovery was successful.  
+    ERROR_REGISTRY_CORRUPT = 0x3F7 # The registry is corrupted. The structure of one of the files containing registry data is corrupted, or the system's memory image of the file is corrupted, or the file could not be recovered because the alternate copy or log was absent or corrupted.  
+    ERROR_REGISTRY_IO_FAILED = 0x3F8 # An I/O operation initiated by the registry failed unrecoverably. The registry could not read in, or write out, or flush, one of the files that contain the system's image of the registry.  
+    ERROR_NOT_REGISTRY_FILE = 0x3F9 # The system has attempted to load or restore a file into the registry, but the specified file is not in a registry file format.  
+    ERROR_KEY_DELETED = 0x3FA # Illegal operation attempted on a registry key that has been marked for deletion.  
+    ERROR_NO_LOG_SPACE = 0x3FB # System could not allocate the required space in a registry log.  
+    ERROR_KEY_HAS_CHILDREN = 0x3FC # Cannot create a symbolic link in a registry key that already has subkeys or values.  
+
 
 
 FILE_ATTRIB_DEFAULT = win32const.FILE_ATTRIBUTE_ARCHIVE | win32const.FILE_ATTRIBUTE_NORMAL
@@ -2290,6 +2377,123 @@ class Kernel(dict):
 class RawKernel(Kernel):
     pass
 
+
+REG_HIVE_HKCR = 0x80000000
+REG_HIVE_HKCU = 0x80000000
+REG_HIVE_HKLM = 0x80000002
+REG_HIVE_HKU  = 0x80000003
+REG_HIVE_HKCC = 0x80000005
+REG_HIVE_HKDD = 0x80000006
+
+
+reg_hives = { v: k for k, v in globals().items() if k.startswith("REG_HIVE_HK") }
+     
+class Win32Registry(e_config.EnviConfig):
+    def __init__(self, filename=None, defaults=None, docs=None, autosave=False, conjbyte='\\'):
+        self.conjbyte = conjbyte
+        self.handles = []
+        self.handlenum = itertools.count()
+        self.accesstracker = collections.defaultdict(int)
+
+    #### Registry-specific extensions to the EnviConfig.  
+    #### access/parsing using configurable conjugation byte
+    def getConfigPaths(self):
+        '''
+        Return a list of tuples including: (type, valid path strings, existing value)
+
+        'type' can be CONFIG_PATH or CONFIG_ENTRY to indicate whether the tuple
+        represents a subconfig or an actual key/value pair
+        '''
+        paths = []
+        todo = [([], self)]
+
+        while todo:
+            path, config = todo.pop()
+
+            cfgkeys = config.keys()
+            if cfgkeys:
+                pathstr = self.conjbyte.join(path) + self.conjbyte
+                newpaths = [(CONFIG_ENTRY, "%s%s" % (pathstr, key), "%s" % (config[key])) for key in cfgkeys]
+                paths.extend(newpaths)
+
+            subnames = config.getSubConfigNames()
+            if not len(subnames):
+                paths.append((CONFIG_PATH, self.conjbyte.join(path), None))
+                continue
+
+            for subname in subnames:
+                newpath = path[:]
+                newpath.append(subname)
+                newconfig = config.getSubConfig(subname, add=False)
+                todo.append((newpath, newconfig))
+
+        return paths
+
+    def parseConfigOption(self, optstr, add=False):
+        '''
+        Parse a simple foo.bar.baz=<json> syntax string into
+        the current config.
+        '''
+        if '=' not in optstr:
+            raise e_exc.ConfigNoAssignment(optstr)
+
+        optpath, valstr = optstr.split('=', 1)
+
+        optparts = optpath.split(self.conjbyte)
+
+        config = self
+        for opart in optparts[:-1]:
+            config = config.getSubConfig(opart, add=add)
+            if config is None:
+                raise e_exc.ConfigInvalidName(optpath)
+
+        optname = optparts[-1]
+        if optname not in config.cfginfo and not add:
+            raise e_exc.ConfigInvalidOption(optname)
+
+    def getSubConfig(self, name, add=True):
+        subcfg = self.cfgsubsys.get(name)
+        if subcfg is None and add:
+            subcfg = self.__class__()
+            self.cfgsubsys[name] = subcfg
+            subcfg.autosave = self.autosave
+            # Monkey patch the save method...
+            subcfg.saveConfigFile = self.saveConfigFile
+        return subcfg
+
+    def getRegistryKey(self, longname):
+        self.accesstracker[longname] += 1
+        print("getRegistryKey(%r)" % longname)
+        keys = longname.split(self.conjbyte)
+        subthing = self
+
+        for key in keys:
+            subthing = getattr(subthing, key)
+
+        return subthing
+
+    ### Registry Specific Functionality
+    def RegOpenKey(self, hkeystr, SubKeyStr, ulopts, samDesired):
+        try:
+            if not self.getRegistryKey(hkeystr):
+                print("Trying to Open Registry Key: %r (doesn't exist)" % hkeystr)
+                return
+
+        except Exception as e:
+            print ("FAILURE in registry: %r" % e)
+            return
+
+        print("RegOpenKeyExA(%r, %r, 0x%x, 0x%x)" % (hkeystr, pSubKeyStr, ulopts, samDesired))
+        hidx = next(self.handlenum)
+        status = REG_STAT_OPEN
+        self.handles.append(hkeystr, SubKeyStr, ulopts, samDesired, status)
+        return hidx
+
+REG_STAT_OPEN = 1
+REG_STAT_CLOSED = 2
+
+
+
 class WinKernel(Kernel):
     sep = b'\\'
     def __init__(self, emu, vermaj=6, vermin=1, arch='i386', syswow=False, **kwargs):
@@ -2319,6 +2523,9 @@ class WinKernel(Kernel):
         self.last_error = 0
         self.mutexes = {}
         self.dllonexits = {}
+
+        reg_data = kwargs.get('registry', {})
+        self.registry = Win32Registry(reg_data)
 
         self.freedLibs = collections.defaultdict(dict)
 
