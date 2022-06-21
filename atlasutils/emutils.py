@@ -2536,7 +2536,7 @@ class WinKernel(Kernel):
         self.dllonexits = {}
 
         reg_data = kwargs.get('registry', {})
-        self.registry = Win32Registry(reg_data)
+        self.registry = Win32Registry(defaults=reg_data)
 
         self.freedLibs = collections.defaultdict(dict)
 
