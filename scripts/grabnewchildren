@@ -18,7 +18,7 @@ process="$1"
 IGNORE='('$$` ps ax | grep "$process" | while read PID STUFF; do echo -n "|$PID" ;done`')'
 
 while true; do
-  NEWPID=`ps ax |grep "$process" | egrep -v '(grep|grabnewchildren)' |egrep -v "$IGNORE" |cut -c-6`
+  NEWPID=`ps ax |grep "$process" | egrep -v '(grep|grabnewchildren)' |egrep -v "$IGNORE" |cut -c-8`
   if [ "$NEWPID" ]; then
     echo "gdb \"$process\" $NEWPID"
     gdb "$process" $NEWPID
