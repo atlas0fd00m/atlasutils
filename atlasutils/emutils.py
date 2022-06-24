@@ -4,7 +4,7 @@ import cmd
 import sys
 import time
 import psutil
-import struct
+import select
 import struct
 import vtrace
 import platform
@@ -201,6 +201,15 @@ class EmuHeap:
             out.append("[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc))
 
         return '\n'.join(out)
+
+    def getSnapshot(self):
+        snap = dict(vars(self))
+        snap.pop('emu')
+        return snap
+
+    def restoreSnapshot(self, snapshot, emu):
+        vars(self).update(snapshot)
+        self.emu = emu
 
 
 def getHeap(emu, initial_size=None):
@@ -1127,19 +1136,21 @@ def isspace(emu, op=None):
 
 def RegOpenKeyExA(emu, op=None):
     emu.temu.stackDump()
-    ccname, cconv = getMSCallConv(emu)
+    ccname, cconv = getMSCallConv(emu, op.va)
     hkey, lpSubKey, ulopts, samDesired, phkResult = cconv.getCallArgs(emu, 5)
+    print("RegOpenKeyExA(0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (hkey, lpSubKey, ulopts, samDesired, phkResult))
     kernel = emu.getMeta('kernel')
 
-    hkeystr = emu.readMemString(hkey)
     SubKeyStr = None
     if lpSubKey:
         if emu.isValidPointer(lpSubKey):
-            SubKeyStr = emu.readMemString(lpSubKey)
+            SubKeyStr = emu.readMemString(lpSubKey).decode('utf8')
         else:
+            # must be a constant base:
             print("RegOpenKeyExA: lpSubKey not NULL and not pointer: 0x%x" % lpSubKey)
+            print("     Instead using: %r" % SubKeyStr)
 
-    handle = kernel.registry.RegOpenKey(hkeystr, SubKeyStr, ulopts, samDesired)
+    handle = kernel.registry.RegOpenKey(hkey, SubKeyStr, ulopts, samDesired)
     if handle:
         emu.writeMemoryPtr(phkResult, handle)
         retval = 0
@@ -1147,17 +1158,53 @@ def RegOpenKeyExA(emu, op=None):
     else:
         retval = win32const.ERROR_BADKEY
 
-    print("RegOpenKeyExA(%r, %r, 0x%x, 0x%x, 0x%x)" % (hkey, lpSubKey, ulopts, samDesired, phkResult))
     cconv.execCallReturn(emu, retval, 5)
     
 def RegQueryValueExA(emu, op=None):
-    ccname, cconv = getLibcCallConv(emu)
-    hKey, lpValueName, lpReserved, lpType, lpData, lpcbData = cconv.getCallArgs(emu, 6)
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hkey, lpValueName, lpReserved, lpType, lpData, lpcbData = cconv.getCallArgs(emu, 6)
+    kernel = emu.getMeta('kernel')
+    print("RegQueryValueExA(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x)" % (hkey, lpValueName, lpReserved, lpType, lpData, lpcbData))
 
-    cconv.execCallReturn(emu, retval, 5)
+    ValueName = emu.readMemString(lpValueName).decode('utf8')
+    print("RegQueryValueExA(%r, %r, 0x%x, 0x%x, 0x%x, 0x%x)" % (hkey, ValueName, lpReserved, lpType, lpData, lpcbData))
+
+    rtype = None
+    rval = None
+
+    try:
+        rtype, rval = kernel.registry.RegQueryValue(hkey, ValueName)
+        if lpType:
+            emu.writeMemoryPtr(lpType, rtype)
+
+        if lpData:
+            emu.writeMemory(lpData, rval)
+
+        if lpcbData:
+            emu.writeMemoryPtr(lpcbData, len(rval))
+
+    except Exception as e:
+        print("Error: %r" % e)
+
+    if None in (rtype, rval):
+        print("RegQueryValueExA: Cannot find key data!")
+        retval = win32const.ERROR_BADKEY
+    else:
+        retval = 0
+
+    print("RegQueryValueExA(0x%x, %r, 0x%x, 0x%x, 0x%x, 0x%x)" % (hkey, ValueName, lpReserved, lpType, lpData, lpcbData))
+
+    cconv.execCallReturn(emu, retval, 6)
 
 def RegCloseKey(emu, op=None):
-    pass
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hkey, = cconv.getCallArgs(emu, 1)
+    kernel = emu.getMeta('kernel')
+    print("RegCloseKey(0x%x)" % (hkey,))
+
+    retval = kernel.registry.RegCloseKey(hkey)
+
+    cconv.execCallReturn(emu, retval, 1)
 
 
 class FakeFile:
@@ -2194,6 +2241,16 @@ class Kernel(dict):
         self._syscall_handlers = {}
         self._syscall_handlers.update(kwargs.get('syscall_handlers', {}))
 
+    def getSnapshot(self):
+        snap = dict(vars(self))
+        snap.pop('emu')
+        return snap
+
+    def restoreSnapshot(self, snapshot, emu):
+        vars(self).update(snapshot)
+        self.emu = emu
+
+
     def _convertEnvName(self, varname):
         return varname
 
@@ -2395,14 +2452,34 @@ REG_HIVE_HKU  = 0x80000003
 REG_HIVE_HKCC = 0x80000005
 REG_HIVE_HKDD = 0x80000006
 
+reg_hives = { v: k[9:] for k, v in globals().items() if k.startswith("REG_HIVE_HK") } 
 
-reg_hives = { v: k for k, v in globals().items() if k.startswith("REG_HIVE_HK") }
-     
+REG_NONE = 0x00000000   # No value type is defined.  
+REG_SZ = 0x00000001     # A string.  
+REG_EXPAND_SZ = 0x00000002  # A string that can contain unexpanded references to environment variables, for example, "%PATH%".
+REG_BINARY = 0x00000003     # Binary data in any form.
+REG_DWORD = 0x00000004  # A 32-bit number.  
+REG_DWORD_LITTLE_ENDIAN = 0x00000004    # A 32-bit number in little-endian format; equivalent to REG_DWORD.  
+REG_DWORD_BIG_ENDIAN = 0x00000005   # A 32-bit number in big-endian format.  
+REG_LINK = 0x00000006   # Symbolic link to a registry key.  
+REG_MULTI_SZ = 0x00000007   # A REG_MULTI_SZ structure as specified in [MS-RRP] section 2.2.5.  
+REG_RESOURCE_LIST = 0x00000008  # A device driver resource list.  
+REG_QWORD = 0x0000000B  # A 64-bit number.  
+REG_QWORD_LITTLE_ENDIAN = 0x0000000B    # 
+
+reg_type_map = {
+        bytes: REG_SZ,
+        str: REG_MULTI_SZ,
+        int: REG_DWORD,
+        }
+
 class Win32Registry(e_config.EnviConfig):
     def __init__(self, filename=None, defaults=None, docs=None, autosave=False, conjbyte='\\'):
+        # TODO: probably should make all fields compare against upper() or lower(), and standardize
+        # all accesses on that.
         e_config.EnviConfig.__init__(self, filename, defaults, docs, autosave)
         self.conjbyte = conjbyte
-        self.handles = []
+        self.handles = [(None, None, None, None, None)]
         self.handlenum = itertools.count()
         self.accesstracker = collections.defaultdict(int)
 
@@ -2484,21 +2561,78 @@ class Win32Registry(e_config.EnviConfig):
         return subthing
 
     ### Registry Specific Functionality
-    def RegOpenKey(self, hkeystr, SubKeyStr, ulopts, samDesired):
+    def RegOpenKey(self, hkey, SubKeyStr, ulopts, samDesired):
+        hkeystr = reg_hives.get(hkey)
+
+        key = self.conjbyte.join([hkeystr, SubKeyStr])
+
         try:
-            if not self.getRegistryKey(hkeystr):
-                print("Trying to Open Registry Key: %r (doesn't exist)" % hkeystr)
+            if not self.getRegistryKey(key):
+                print("Trying to Open Registry Key: %r (doesn't exist)" % key)
                 return
 
         except Exception as e:
-            print ("FAILURE in registry: %r" % e)
+            print("FAILURE in registry: %r" % e)
+            traceback.print_exc()
             return
 
-        print("RegOpenKeyExA(%r, %r, 0x%x, 0x%x)" % (hkeystr, pSubKeyStr, ulopts, samDesired))
-        hidx = next(self.handlenum)
+        print("RegOpenKeyExA(%r, %r, 0x%x, 0x%x) => %r" % (hkeystr, SubKeyStr, ulopts, samDesired, key))
+        #hidx = next(self.handlenum)
+        hidx = len(self.handles)
         status = REG_STAT_OPEN
-        self.handles.append(hkeystr, SubKeyStr, ulopts, samDesired, status)
+        self.handles.append([hkeystr, SubKeyStr, ulopts, samDesired, status])
         return hidx
+
+    def RegQueryValue(self, hkey, ValueName):
+        if hkey < len(self.handles):
+            handle = self.handles[hkey]
+            hkeystr, SubKeyStr, ulopts, samDesired, status = handle
+            key = self.conjbyte.join([hkeystr, SubKeyStr, ValueName])
+            keytype = self.conjbyte.join([hkeystr, SubKeyStr, 'type:' + ValueName])
+
+        else:
+            hkeystr = reg_hives.get(hkey)
+            key = self.conjbyte.join([hkeystr, ValueName])
+
+        rval = self.getRegistryKey(key)
+        try:
+            if not rval:
+                print("Trying to Open Registry Key: %r (doesn't exist)" % key)
+                return
+
+        except Exception as e:
+            print("FAILURE in registry: %r" % e)
+            traceback.print_exc()
+            return
+
+        rtype = None
+        try:
+            rtype = self.getRegistryKey(keytype)
+        except Exception as e:
+            print("info: %r" % e)
+
+        if not rtype:
+            rtype = reg_type_map.get(type(rval))
+
+        if type(rval) == str:
+            if rtype == REG_SZ:
+                rval = rval.encode('utf8')
+            elif type == REG_MULTI_SZ:
+                rval = rval.encode('utf-16')
+            elif type in (REG_DWORD, REG_QWORD):
+                rval = int(rval, 0)
+
+
+        print("RegQueryValueExA(%r, %r, 0x%x, 0x%x) => %r: %r" % (hkeystr, ValueName, ulopts, samDesired, rtype, rval))
+        return rtype, rval
+
+    def RegCloseKey(self, hkey):
+        handle = self.handles[hkey]
+        handle[4] = REG_STAT_CLOSED
+
+        return 0
+
+
 
 REG_STAT_OPEN = 1
 REG_STAT_CLOSED = 2
@@ -2590,7 +2724,6 @@ class WinKernel(Kernel):
 
         else:   # first time load
             print("loadLibrary(0x%x, %r) loading" % (va, libname))
-
 
 
     def getStackInfo(self):
@@ -3112,6 +3245,51 @@ class TestEmulator:
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
 
+    def getHeap(emu, initial_size=None):
+        '''
+        Helper function to make the heap easily accessible
+        '''
+        return getHeap(self.emu)
+
+    def getSnapshot(self):
+        snap = dict(vars(self))
+
+        snap['vw'] = None
+        snap['vwg'] = None
+        snap['emu'] = None
+
+        emumeta = dict(emu.metadata)
+        heap = self.getHeap()
+        kernel = self.getKernel()
+        emumeta['Heap'] = None
+        emumeta['kernel'] = None
+        snap['_HEAP'] = heap.getSnapshot()
+        snap['_EMUMETA'] = emumeta
+        snap['_EMUSNAP'] = self.emu.getEmuSnap()
+        snap['_KERNEL'] = kernel.getSnapshot()
+        return snap
+
+    def restoreSnapshot(self, snapshot, vw):
+        '''
+        because we wipe out the VivWorkspace from the snapshot, we need it again to wrap back in
+        '''
+        emu = vw.getEmulator()
+        emu.metadata = snapshot.pop('_EMUMETA')
+        emu.setEmuSnap(snapshot.pop('_EMUSNAP'))
+
+        # create new heap then restore into it.
+        heapsnap = snapshot.get('_HEAP')
+        heap = getHeap(emu)
+        heap.restoreSnapshot(heapsnap, emu)
+
+        # now actually clear the heap out of the snapshot
+        snapshot.pop('_HEAP')
+
+        vars(self).update(snapshot)
+        self.vw = vw
+        self.emu.vw = vw
+        self.vwg = vw.getVivGui()
+
     def addDirectory(self, dirpath, attrib=0):
         '''
         Add a directory to the Fake Filesystem.
@@ -3468,13 +3646,15 @@ class TestEmulator:
         print("since start: %d instructions in %.3f secs: %3f ops/sec" % \
                 (i, dtime, i//dtime))
 
-    def resetNonstop(self):
+    def resetNonstop(self, resetSilent=True):
         '''
         Reset pause, nonstop, and tova
         '''
         self.pause = True
         self.nonstop = 0
         self.tova = None
+        if resetSilent:
+            self.silent = False
 
     def runStep(self, maxstep=1000000, follow=True, showafter=True, runTil=None, pause=True, silent=False, finish=0, tracedict=None, bps=()):
         '''
@@ -3566,9 +3746,24 @@ class TestEmulator:
         silentExcept = [va for va, expr in tracedict.items() if expr is None]
 
         i = 0
+        pc = None
         self.startRun = time.time()
         while maxstep > i:
             try:
+                # check for input if we're in silent mode
+                if self.silent and keystop():
+                    _keypress = sys.stdin.read(1)
+                    print("stdin: %r" % _keypress)
+                    if _keypress == 'q':
+                        self.resetNonstop()
+
+                    if _keypress == 'r':
+                        return
+
+                    if _keypress == 'I':
+                        self.printStats(i)
+
+
                 skip = skipop = False
                 i += 1
 
@@ -3579,6 +3774,7 @@ class TestEmulator:
                     break
 
                 if pc in self.bps:
+                    print("BREAKPOINT HIT!  0x%x" % pc)
                     self.resetNonstop()
 
                 op = emu.parseOpcode(pc)
@@ -3605,6 +3801,8 @@ class TestEmulator:
                                 lcls.update(emu.getRegisterContext().getRegisters())
 
                             print(repr(eval(tdata, globals(), lcls)))
+                        except KeyboardInterrupt:
+                            raise
                         except Exception as e:
                             print("TraceMonitor ERROR at 0x%x: %r" % (pc, e))
 
@@ -3623,6 +3821,8 @@ class TestEmulator:
                     self.showFlags() # ARM fails this right now.
                     try:
                         self.printMemStatus(op)
+                    except KeyboardInterrupt:
+                        raise
                     except Exception as e:
                         print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
                         traceback.print_exc()
@@ -3631,6 +3831,8 @@ class TestEmulator:
                     mcanv.clearCanvas()
                     try:
                         op.render(mcanv)
+                    except KeyboardInterrupt:
+                        raise
                     except Exception as e:
                         print("ERROR rendering opcode: %r" % e)
 
@@ -3808,6 +4010,8 @@ class TestEmulator:
                                                     size = parseExpression(emu, nsize)
                                                     data = emu.readMemory(va, size)
                                                     print("[%s:%s] == %r" % (nexpr, size, data.hex()))
+                                                except KeyboardInterrupt:
+                                                    raise
                                                 except Exception as e:
                                                     # if number fails, just continue with a default size and the original expr
                                                     print("unknown size: %r.  using default size." % size)
@@ -3844,6 +4048,8 @@ class TestEmulator:
                                             print(hex(out))
                                         else:
                                             print(out)
+                                    except KeyboardInterrupt:
+                                        raise
                                     except:
                                         sys.excepthook(*sys.exc_info())
 
@@ -3876,6 +4082,8 @@ class TestEmulator:
                     except e_exc.BreakpointHit:
                         print("Breakpoint Hit!")
                         failed = True
+                    except KeyboardInterrupt:
+                        raise
 
                     # check for failure, and look for an op_handler. then raise an exception
                     if failed:
@@ -3902,6 +4110,8 @@ class TestEmulator:
                                 print("after:\t%s\t%s"%(mcanv.strval, extra))
 
                             self.printMemStatus(op, use_cached=True)
+                        except KeyboardInterrupt:
+                            raise
                         except Exception as e:
                             print("MEM ERROR: %s:    0x%x %s" % (e, op.va, op))
                             sys.excepthook(*sys.exc_info())
@@ -3923,13 +4133,13 @@ class TestEmulator:
                     skip, skipop = self.handleBranch(op, skip, skipop)
                 else:
                     sys.excepthook(*sys.exc_info())
-                    print("Exception at instruction #%d" % i)
+                    print("Exception at instruction #%d (0x%x)" % (i, pc))
                     self.resetNonstop()
                     self.printStats(i)
                     break
 
             except:
-                print("Exception at instruction #%d" % i)
+                print("Exception at instruction #%d (0x%x)" % (i, pc))
                 self.printStats(i)
                 self.resetNonstop()
                 sys.excepthook(*sys.exc_info())
@@ -4153,6 +4363,13 @@ def insertComment(vw, va, comment):
     else:
         vw.setComment(va, comment)
 
+
+
+def keystop(delay=0):
+    if os.name == 'posix':
+        return len(select.select([sys.stdin],[],[],delay)[0])
+    else:
+        return msvcrt.kbhit()
 
 
 if __name__ == "__main__":
