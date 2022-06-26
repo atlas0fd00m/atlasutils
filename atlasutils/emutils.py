@@ -1442,7 +1442,7 @@ def LoadLibraryExA(emu, op=None):
                 break
 
             except Exception as e:
-                print(e)
+                print("Error while attempting to load %r:  %r" % (normfn, e))
 
         # run Library Init routine (__entry)
         ret = emu.readMemoryPtr(emu.getStackCounter())  # FIXME: rework using cconv: this only works on archs where RET is pushed to the stack
@@ -1464,6 +1464,8 @@ def LoadLibraryExA(emu, op=None):
             emu.temu.runStep(silent=emu.temu.silent, pause=False, runTil=0x8831337)
 
             print("COMPLETED LIBRARY INITIALIZER: %r" % libFileName)
+            if emu.getMeta("LibInitPause", False):
+                input()
         else:
             print("No Library Init found, just returning")
 
@@ -1868,7 +1870,7 @@ def vsnprintf(emu, op=None):
     emu.writeMemory(s, out[:n])
     result = len(out)
 
-    input("vsnprintf: %r" % out)
+    print("vsnprintf: %r" % out)
     cconv.execCallReturn(emu, result, 4)
    
 
@@ -1942,7 +1944,7 @@ def vsprintf_s(emu, op=None):
     emu.writeMemory(s, outstr)
     result = len(outstr)
 
-    input("vsprintf_s: %r" % outstr)
+    print("vsprintf_s: %r" % outstr)
     cconv.execCallReturn(emu, result, 4)
    
 
@@ -2584,6 +2586,17 @@ class Win32Registry(e_config.EnviConfig):
         return hidx
 
     def RegQueryValue(self, hkey, ValueName):
+        '''
+        Returns the appropriate value from our fake registry
+
+        Performs conversion based on what type is expected.
+        If no type is specified:
+            Str is considered 'utf-16'
+            Bytes is considered 'utf-8'
+            Int is considered a "DWORD"
+
+        Set a type for entry "<name>" in the registry by setting the "type:<name>" registry key.
+        '''
         if hkey < len(self.handles):
             handle = self.handles[hkey]
             hkeystr, SubKeyStr, ulopts, samDesired, status = handle
@@ -2616,9 +2629,9 @@ class Win32Registry(e_config.EnviConfig):
 
         if type(rval) == str:
             if rtype == REG_SZ:
-                rval = rval.encode('utf8')
+                rval = rval.encode('utf8') + '\0'
             elif type == REG_MULTI_SZ:
-                rval = rval.encode('utf-16')
+                rval = rval.encode('utf-16') + '\0\0'
             elif type in (REG_DWORD, REG_QWORD):
                 rval = int(rval, 0)
 
@@ -4177,7 +4190,7 @@ class TestEmulator:
                 ccname, cconv = emu.getCallingConventions()[0]
                 cconv.allocateReturnAddress(emu)    # this assumes we've called
                 cconv.setReturnAddress(emu, retva)
-                print("\n%r:  setting return address to 0x%x" % (handler, retva))
+                print("\n%r:  setting return address to 0x%x (op=%r  op.va=0x%x)" % (handler, retva, op, op.va))
 
             handler(emu, op)
             skip = True
