@@ -2622,18 +2622,24 @@ class Win32Registry(e_config.EnviConfig):
         try:
             rtype = self.getRegistryKey(keytype)
         except Exception as e:
-            print("info: %r" % e)
+            print("no type info found, using stored data type defaults: %r" % e)
 
         if not rtype:
             rtype = reg_type_map.get(type(rval))
 
         if type(rval) == str:
+            # need to convert to bytes() for use in the emulator
             if rtype == REG_SZ:
-                rval = rval.encode('utf8') + '\0'
+                rval = rval.encode('latin1') + '\0'
             elif type == REG_MULTI_SZ:
                 rval = rval.encode('utf-16') + '\0\0'
             elif type in (REG_DWORD, REG_QWORD):
                 rval = int(rval, 0)
+
+        elif type(rval) == bytes:
+            # if we're already bytes(), append a NULL terminator
+            if not len(rval) or rval[-1] != b'\0':
+                rval = rval + b'\0'
 
 
         print("RegQueryValueExA(%r, %r, 0x%x, 0x%x) => %r: %r" % (hkeystr, ValueName, ulopts, samDesired, rtype, rval))
@@ -3784,10 +3790,12 @@ class TestEmulator:
                 if pc in (runTil, finish):
                     if not self.silent:
                         print("PC reached 0x%x." % pc)
+                        self.printStats(i)
                     break
 
                 if pc in self.bps:
                     print("BREAKPOINT HIT!  0x%x" % pc)
+                    self.printStats(i)
                     self.resetNonstop()
 
                 op = emu.parseOpcode(pc)
