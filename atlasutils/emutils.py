@@ -956,6 +956,10 @@ def _initterm_e(emu, op=None):
                 emu.setProgramCounter(fnptr)
                 emu.temu.runStep(silent=emu.temu.silent, pause=False, finish=0x82345678)
 
+                if emu.getMeta('CallHookBT'):
+                    stackDump(emu)
+                #import envi.interactive as ei; ei.dbg_interact(locals(), globals())
+
                 sanitychk = emu.getProgramCounter()
                 if sanitychk != 0x82345678:
                     raise Exception("_initterm_e() stack craziness.  Investigate! PC=0x%x", sanitychk)
@@ -992,6 +996,10 @@ def _initterm(emu, op=None):
 
                 emu.setProgramCounter(fnptr)
                 emu.temu.runStep(silent=emu.temu.silent, pause=False, finish=0x82345678)
+
+                if emu.getMeta('CallHookBT'):
+                    stackDump(emu)
+                #import envi.interactive as ei; ei.dbg_interact(locals(), globals())
 
                 sanitychk = emu.getProgramCounter()
                 if sanitychk != 0x82345678:
@@ -4405,7 +4413,8 @@ class TestEmulator:
             skip = True
             if not op.isCall():
                 # this was a branch... our handlers are intended to handle calls.
-                print("handleBranch(): have handler, but %r (at 0x%x) is not a call, may work fine, but may not." % (op, op.va))
+                if not emu.getMeta('SuppressNonCallBranchMessage'):
+                    print("handleBranch(): have handler, but %r (at 0x%x) is not a call, may work fine, but may not." % (op, op.va))
 
 
         elif self._follow and not skip and not skipop:
