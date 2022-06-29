@@ -1170,8 +1170,8 @@ def fopen(emu, op=None):
         retval = EACCES
 
     else:
-
         retval = 0
+        myfile = None
 
         try:
             retval, myfile = kernel.fopen(filename, mode)
