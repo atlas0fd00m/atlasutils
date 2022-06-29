@@ -218,7 +218,7 @@ class EmuHeap:
         chunkdata = self.findChunk(va)
         if chunkdata:
             (baseva, size, allocpc, data) = chunkdata
-            return "[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc))
+            return "[0x%x:0x%x]: %r (0x%x)" % (baseva, size, data.hex(), allocpc)
 
         return "No heap chunk found containing va 0x%x" % va
 
@@ -3333,7 +3333,7 @@ def heapDumpChunk(emu, va):
     Dump the Heap allocation containing va
     '''
     heap = getHeap(emu)
-    print(heap.dumphunk(va))
+    print(heap.dumpChunk(va))
 
 def getWindowsDef(normname='ntdll', arch='i386', wver='6.1.7601', syswow=False):
     '''
