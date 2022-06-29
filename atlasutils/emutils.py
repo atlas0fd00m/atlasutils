@@ -769,11 +769,26 @@ def SetLastError(emu, op=None):
     kernel.setLastError(last_error)
     cconv.execCallReturn(emu, 0, 1)
 
+def GetCurrentThread(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    curthread = kernel.getCurThread()
+    print("GetCurrentThread() => %r" % curthread)
+    cconv.execCallReturn(emu, curthread, 0)
+
 def GetCurrentThreadId(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
     print("GetCurrentThreadId()")
     cconv.execCallReturn(emu, kernel.getCurThread(), 0)
+
+def GetCurrentProcess(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    curpid = kernel.getCurPid()
+    print("GetCurrentProcess() => %r" % curpid)
+    cconv.execCallReturn(emu, curpid, 0)
+    # TODO: create a "Handle Generating System" that manages all handles
 
 def GetCurrentProcessId(emu, op=None):
     kernel = emu.getMeta('kernel')
@@ -788,6 +803,17 @@ def GetTickCount(emu, op=None):
     print("GetTickCount()")
     cconv.execCallReturn(emu, tickcount, 0)
 
+def GetMessageTime(emu, op=None):
+    '''
+    Returns a long int simulating the time since last GetMessage call
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    msgtime = kernel.GetMessageTime()
+    print("GetMessageTime() => %r" % msgtime)
+
+    cconv.execCallReturn(emu, msgtime, 1)
+
 def GetSystemTime(emu, op=None):
     '''
     Returns a pointer to a SYSTEMTIME structure
@@ -801,6 +827,25 @@ def GetSystemTime(emu, op=None):
     emu.writeMemoryFormat(lpSystemTimeAsFileTime, '<Q', winktime)
 
     cconv.execCallReturn(emu, 0, 1)
+
+def GetSystemTimes(emu, op=None):
+    '''
+    Returns three pointers to a FILETIME structures:
+    * IdleTime
+    * KernelTime
+    * UserTime
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpIdleTime, lpKernelTime, lpUserTime = cconv.getCallArgs(emu, 3)
+    print("GetSystemTimes(0x%x, 0x%x, 0x%x)" % (lpIdleTime, lpKernelTime, lpUserTime))
+
+    idletime, winktime, usertime = kernel.GetSystemTimes()
+    emu.writeMemoryFormat(lpIdleTime, '<Q', idletime)
+    emu.writeMemoryFormat(lpKernelTime, '<Q', winktime)
+    emu.writeMemoryFormat(lpUserTime, '<Q', usertime)
+
+    cconv.execCallReturn(emu, 1, 3)
 
 def GetSystemTimeAsFileTime(emu, op=None):
     '''
@@ -834,6 +879,50 @@ def SystemTimeToFileTime(emu, op=None):
     emu.writeMemoryFormat(lpFileTime, '<Q', winktime)
 
     cconv.execCallReturn(emu, 1, 2)
+
+def GetProcessTimes(emu, op=None):
+    '''
+    Returns three pointers to a FILETIME structures:
+    * CreationTime
+    * ExitTime
+    * KernelTime
+    * UserTime
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hProcess, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime = cconv.getCallArgs(emu, 5)
+
+    creationtime, exittime, winktime, usertime = kernel.GetProcessTimes(hProcess)
+    print("GetProcessTimes(0x%x, 0x%x, 0x%x, 0x%x, 0x%x) => (0x%x, 0x%x, 0x%x, 0x%x)" % (hProcess, \
+            lpCreationTime, lpExitTime, lpKernelTime, lpUserTime, creationtime, exittime, winktime, \
+            usertime))
+    emu.writeMemoryFormat(lpCreationTime, '<Q', creationtime)
+    emu.writeMemoryFormat(lpExitTime, '<Q', exittime)
+    emu.writeMemoryFormat(lpKernelTime, '<Q', winktime)
+    emu.writeMemoryFormat(lpUserTime, '<Q', usertime)
+
+    cconv.execCallReturn(emu, 1, 5)
+
+def GetThreadTimes(emu, op=None):
+    '''
+    Returns three pointers to a FILETIME structures:
+    * CreationTime
+    * ExitTime
+    * KernelTime
+    * UserTime
+    '''
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime = cconv.getCallArgs(emu, 5)
+
+    creationtime, exittime, winktime, usertime = kernel.GetThreadTimes(hThread)
+    print("GetThreadTimes(0x%x, 0x%x, 0x%x, 0x%x, 0x%x) => (0x%x, 0x%x, 0x%x, 0x%x)" % (hThread, lpCreationTime, lpExitTime, lpKernelTime, lpUserTime, creationtime, exittime, winktime, usertime))
+    emu.writeMemoryFormat(lpCreationTime, '<Q', creationtime)
+    emu.writeMemoryFormat(lpExitTime, '<Q', exittime)
+    emu.writeMemoryFormat(lpKernelTime, '<Q', winktime)
+    emu.writeMemoryFormat(lpUserTime, '<Q', usertime)
+
+    cconv.execCallReturn(emu, 1, 5)
 
 
 def QueryPerformanceCounter(emu, op=None):
@@ -2102,11 +2191,16 @@ import_map = {
         'kernel32.TlsAlloc': TlsAlloc,
         'kernel32.TlsGetValue': TlsGetValue,
         'kernel32.TlsSetValue': TlsSetValue,
+        'kernel32.GetCurrentThread': GetCurrentThread,
+        'kernel32.GetCurrentProcess': GetCurrentProcess,
         'kernel32.GetCurrentThreadId': GetCurrentThreadId,
         'kernel32.GetCurrentProcessId': GetCurrentProcessId,
         'kernel32.GetTickCount': GetTickCount,
         'kernel32.GetSystemTime': GetSystemTime,
+        'kernel32.GetSystemTimes': GetSystemTimes,
         'kernel32.GetSystemTimeAsFileTime': GetSystemTimeAsFileTime,
+        'kernel32.GetProcessTimes': GetProcessTimes,
+        'kernel32.GetThreadTimes': GetThreadTimes,
         'kernel32.SystemTimeToFileTime': SystemTimeToFileTime,
         'kernel32.QueryPerformanceCounter': QueryPerformanceCounter,
         'kernel32.CompareStringW': CompareStringW,
@@ -2125,6 +2219,7 @@ import_map = {
         'kernel32.EncodePointer': EncodePointer,
         'kernel32.DecodePointer': DecodePointer,
         'kernel32.IsDebuggerPresent': IsDebuggerPresent,
+        'user32.GetMessageTime': GetMessageTime,
         'ntdll._vsnprintf': vsnprintf,
         'msvcr100._lock': _lock,
         'msvcr100._unlock': _unlock,
@@ -2246,6 +2341,12 @@ class Kernel(dict):
     def getSnapshot(self):
         snap = dict(vars(self))
         snap.pop('emu')
+        snap['_FDS'] = [fd.name for fd in snap.pop('fds')]  # FIXME: this needs to be figured out: filepaths and offsets stored and restored
+        snap.pop('_syscall_handlers')   # FIXME: this won't store either.
+        snap.pop('win32k')
+        snap.pop('ntdll')
+        snap.pop('ntoskrnl')
+        #snap.pop('_FDS')
         return snap
 
     def restoreSnapshot(self, snapshot, emu):
@@ -2475,6 +2576,8 @@ reg_type_map = {
         int: REG_DWORD,
         }
 
+reg_types_lookup = {v: k for k,v in globals().items() if k.startswith('REG_')}
+
 class Win32Registry(e_config.EnviConfig):
     def __init__(self, filename=None, defaults=None, docs=None, autosave=False, conjbyte='\\'):
         # TODO: probably should make all fields compare against upper() or lower(), and standardize
@@ -2642,7 +2745,8 @@ class Win32Registry(e_config.EnviConfig):
                 rval = rval + b'\0'
 
 
-        print("RegQueryValueExA(%r, %r, 0x%x, 0x%x) => %r: %r" % (hkeystr, ValueName, ulopts, samDesired, rtype, rval))
+        rtypestr = reg_types_lookup.get(rtype)
+        print("RegQueryValueExA(%r, %r, 0x%x, 0x%x) => %r: %r" % (hkeystr, ValueName, ulopts, samDesired, rtypestr, rval))
         return rtype, rval
 
     def RegCloseKey(self, hkey):
@@ -2687,6 +2791,31 @@ class WinKernel(Kernel):
         self.last_error = 0
         self.mutexes = {}
         self.dllonexits = {}
+
+        # System Times  (starting times for an active system)
+        self._idletime = kwargs.get('idletime', 0x27b25da9ec407)
+        self._krnltime = kwargs.get('krnltime', 0x2870db002e4e4)
+        self._usertime = kwargs.get('usertime', 0x692a9796a77)
+
+        # each time GetSystemTimes() is called, this is the amount each will be incremented
+        self._idleinc = kwargs.get('idleinc', 0x512345)
+        self._krnlinc = kwargs.get('krnlinc', 0x71234)
+        self._userinc = kwargs.get('userinc', 0x26123)
+
+        # Process Times
+        # default Creation time is 5 seconds ago
+        self._procCreationTime = kwargs.get('procCreationTime', self.getWinAbsTime(time.time()-5))
+        self._procExitTime = kwargs.get('procExitTime', 0x4141424243434444)
+        self._procKernelTime = kwargs.get('procKernelTime', self._krnltime - 0x10000000)
+        self._procUserTime = kwargs.get('procUserTime', self._usertime - 0x10000000)
+
+        # Thread Times
+        # default Creation time is 3 seconds ago
+        self._threadCreationTime = kwargs.get('threadCreationTime', self.getWinAbsTime(time.time()-3))
+        self._threadExitTime = kwargs.get('threadExitTime', 0x4444444444444444)
+        self._threadKernelTime = kwargs.get('threadKernelTime', self._krnltime - 0x10000000)
+        self._threadUserTime = kwargs.get('threadUserTime', self._usertime - 0x10000000)
+
 
         reg_data = kwargs.get('registry', {})
         self.registry = Win32Registry(defaults=reg_data)
@@ -2829,6 +2958,14 @@ class WinKernel(Kernel):
         '''
         return int((time.time() - psutil.boot_time()) * 1000) & 0xffffffff
 
+    def GetMessageTime(self):
+        '''
+        Retrieves the number of milliseconds that have elapsed from the time the system was first
+        started to the last message retrieved by GetMessage
+        This is currently a *major* hack, making up numbers.
+        '''
+        return int(self._threadCreationTime + 3)
+
     def GetSystemTime(self):
         '''
         Retrieves the current system date and time. The information is in Coordinated Universal Time (UTC) format.
@@ -2844,6 +2981,26 @@ class WinKernel(Kernel):
                 ut[5],
                 0x7a69, # how can you resist having 31337 ms???
                 )
+
+    def GetSystemTimes(self):
+        '''
+        Returns three 64-bit values indicating "precision" timers for 
+        * Idle time
+        * Kernel time
+        * User time
+
+        The fallacy of Windows Kernel actually *providing* this high precision 
+        time allows for some leighway for our estimations here.  Tweak to make 
+        your time-based evaluation work succeed.  Feel free to share results
+        and improvements!
+        '''
+        # heuristically chosen
+        self._idletime += self._idleinc
+        self._krnltime += self._krnlinc
+        self._usertime += self._userinc
+
+        return (self._idletime, self._krnltime, self._usertime)
+
 
     def GetSystemTimeAsFileTime(self):
         '''
@@ -2874,6 +3031,40 @@ class WinKernel(Kernel):
                 -1,
                 )
         return time.mktime(unixtup)
+
+    def GetProcessTimes(self, hProcess):
+        '''
+        Returns fake Thread times:
+        * CreationTime
+        * ExitTime
+        * KernelTime
+        * UserTime
+
+        Currently hProcess doesn't matter
+        '''
+        self._procKernelTime += self._krnlinc +1
+        self._procUserTime += self._userinc +1
+        return (int(self._procCreationTime),
+                int(self._procExitTime),
+                int(self._procKernelTime),
+                int(self._procUserTime))
+
+    def GetThreadTimes(self, hThread):
+        '''
+        Returns fake Thread times:
+        * CreationTime
+        * ExitTime
+        * KernelTime
+        * UserTime
+
+        Currently hThread doesn't matter
+        '''
+        self._threadKernelTime += self._krnlinc
+        self._threadUserTime += self._userinc
+        return (int(self._threadCreationTime),
+                int(self._threadExitTime),
+                int(self._threadKernelTime),
+                int(self._threadUserTime))
 
     def QueryPerformanceCounter(self):
         '''
@@ -3264,7 +3455,7 @@ class TestEmulator:
         emu.setMeta('kernel', kernel)
         self.op_handlers['sysenter'] = kernel.op_sysenter
 
-    def getHeap(emu, initial_size=None):
+    def getHeap(self, initial_size=None):
         '''
         Helper function to make the heap easily accessible
         '''
@@ -3277,7 +3468,7 @@ class TestEmulator:
         snap['vwg'] = None
         snap['emu'] = None
 
-        emumeta = dict(emu.metadata)
+        emumeta = dict(self.emu.metadata)
         heap = self.getHeap()
         kernel = self.getKernel()
         emumeta['Heap'] = None
@@ -3286,6 +3477,10 @@ class TestEmulator:
         snap['_EMUMETA'] = emumeta
         snap['_EMUSNAP'] = self.emu.getEmuSnap()
         snap['_KERNEL'] = kernel.getSnapshot()
+
+        # will need to repopulate these on restore
+        snap.pop('op_handlers')
+        snap.pop('mcanv')
         return snap
 
     def restoreSnapshot(self, snapshot, vw):
@@ -3308,6 +3503,9 @@ class TestEmulator:
         self.vw = vw
         self.emu.vw = vw
         self.vwg = vw.getVivGui()
+
+        kernel = self.getKernel()
+        kernel.restoreSnapshot(snapshot.get('_KERNEL'))
 
     def addDirectory(self, dirpath, attrib=0):
         '''
@@ -4192,6 +4390,9 @@ class TestEmulator:
         self.dbgprint( " handler for call to (0x%x): %r" % (brva, handler))
         if handler is not None:
             if op.isCall():
+                print("handleBranch(%r, %r, %r) (op.va=0x%x)" % (op, skip, skipop, op.va))
+                if self.silent and emu.getMeta('CallHookBT'):
+                    self.stackDump()
                 # apply return address. any supported arch callconv should
                 # get this right... so take the first one.
                 retva = op.va + len(op)
