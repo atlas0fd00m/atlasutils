@@ -832,7 +832,7 @@ def GetMessageTime(emu, op=None):
     msgtime = kernel.GetMessageTime()
     print("GetMessageTime() => %r" % msgtime)
 
-    cconv.execCallReturn(emu, msgtime, 1)
+    cconv.execCallReturn(emu, msgtime, 0)
 
 def GetSystemTime(emu, op=None):
     '''
