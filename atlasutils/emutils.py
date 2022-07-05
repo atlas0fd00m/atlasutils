@@ -22,6 +22,7 @@ import envi.memcanvas as e_memcanvas
 import envi.archs.i386 as e_i386
 import envi.archs.amd64 as e_amd64
 
+import vstruct
 import vivisect
 import vivisect.cli as viv_cli
 import visgraph.pathcore as vg_path
@@ -33,8 +34,9 @@ from binascii import hexlify, unhexlify
 
 from atlasutils.errno import *
 from envi.expression import ExpressionFail
-
 from envi.const import MM_READ, MM_WRITE, MM_EXEC
+from vstruct.primitives import v_uint16, v_uint32, v_uint64
+
 
 # TODO: break into modules  (eg.  emuwin, emulin, emuraw)
 # TODO: group emulated functions into classes
@@ -834,17 +836,32 @@ def GetMessageTime(emu, op=None):
 
     cconv.execCallReturn(emu, msgtime, 0)
 
+class SYSTEMTIME(vstruct.VStruct):
+    def __init__(self, timetup):
+        vstruct.VStruct.__init__(self)
+        self.wYear = v_uint16(timetup[0])
+        self.wMonth = v_uint16(timetup[1])
+        self.wDayOfWeek = v_uint16(timetup[2])
+        self.wDay = v_uint16(timetup[3])
+        self.wHour = v_uint16(timetup[4])
+        self.wMinute = v_uint16(timetup[5])
+        self.wSecond = v_uint16(timetup[6])
+        self.wMilliseconds = v_uint16(timetup[7])
+
 def GetSystemTime(emu, op=None):
     '''
     Returns a pointer to a SYSTEMTIME structure
+    Given in UTC
     '''
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
-    lpSystemTimeAsFileTime, = cconv.getCallArgs(emu, 1)
-    print("GetSystemTime(0x%x)" % lpSystemTimeAsFileTime)
+    lpSystemTime, = cconv.getCallArgs(emu, 1)
+    print("GetSystemTime(0x%x)" % lpSystemTime)
 
     winktime = kernel.GetSystemTime()
-    emu.writeMemoryFormat(lpSystemTimeAsFileTime, '<Q', winktime)
+    systime = SYSTEMTIME(winktime)
+
+    emu.writeMemory(lpSystemTime, systime.vsEmit())
 
     cconv.execCallReturn(emu, 0, 1)
 
@@ -944,7 +961,6 @@ def GetThreadTimes(emu, op=None):
 
     cconv.execCallReturn(emu, 1, 5)
 
-
 def QueryPerformanceCounter(emu, op=None):
     kernel = emu.getMeta('kernel')
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -954,6 +970,27 @@ def QueryPerformanceCounter(emu, op=None):
     emu.writeMemoryFormat(lpPerformanceCount, '<Q', perfcnt)
 
     cconv.execCallReturn(emu, 123, 1)   # non-zero on success
+
+def GlobalMemoryStatus(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    lpBuffer, = cconv.getCallArgs(emu, 1)
+    print("GlobalMemoryStatus(0x%x)" % lpBuffer)
+    memstat = kernel.GlobalMemoryStatus()
+    emu.writeMemory(lpBuffer, memstat.vsEmit())
+
+    cconv.execCallReturn(emu, 123, 1)   # non-zero on success
+
+def GetProcessWorkingSetSize(emu, op=None):
+    kernel = emu.getMeta('kernel')
+    ccname, cconv = getMSCallConv(emu, op.va)
+    hProcess, lpMinWorkingSetSize, lpMaxWorkingSetSize, = cconv.getCallArgs(emu, 3)
+    print("GetProcessWorkingSetSize(0x%x)" % lpBuffer)
+    memstat = kernel.GetProcessWorkingSetSize()
+    emu.writeMemory(lpBuffer, memstat.vsEmit())
+
+    cconv.execCallReturn(emu, 1, 3)   # non-zero on success
+
 
 def _initterm_e(emu, op=None):
     ccname, cconv = getMSCallConv(emu, op.va)
@@ -2231,6 +2268,8 @@ import_map = {
         'kernel32.GetThreadTimes': GetThreadTimes,
         'kernel32.SystemTimeToFileTime': SystemTimeToFileTime,
         'kernel32.QueryPerformanceCounter': QueryPerformanceCounter,
+        'kernel32.GlobalMemoryStatus': GlobalMemoryStatus,
+        'kernel32.GetProcessWorkingSetSize': GetProcessWorkingSetSize,
         'kernel32.CompareStringW': CompareStringW,
         'kernel32.CompareStringA': CompareStringA,
         'kernel32.GetFileAttributesA': GetFileAttributesA,
@@ -2788,6 +2827,32 @@ class Win32Registry(e_config.EnviConfig):
 REG_STAT_OPEN = 1
 REG_STAT_CLOSED = 2
 
+class MEMORYSTATUS(vstruct.VStruct):
+    '''
+    Initialized to sane defaults.  adjust to your needs
+    '''
+    def __init__(self, psize=4):
+        vstruct.VStruct.__init__(self)
+        self.dwLength = v_uint32()
+        self.dwMemoryLoad = v_uint32()
+        if psize == 4:
+            self.dwTotalPhys = v_uint32(0x7fffffff)
+            self.dwAvailPhys = v_uint32(0x76911000)
+            self.dwTotalPageFile = v_uint32(0xffffffff)
+            self.dwAvailPageFile = v_uint32(0xffffffff)
+            self.dwTotalVirtual = v_uint32(0x7ffe0000)
+            self.dwAvailVirtual = v_uint32(0x7a5e4000)
+
+        elif psize == 8:
+            self.dwTotalPhys = v_uint64(32*1024*1024*1024)
+            self.dwAvailPhys = v_uint64(19*1024*1024*1024)
+            self.dwTotalPageFile = v_uint64(200*1024*1024*1024)
+            self.dwAvailPageFile = v_uint64(101*1024*1024*1024)
+            self.dwTotalVirtual = v_uint64(232*1024*1024*1024)
+            self.dwAvailVirtual = v_uint64(120*1024*1024*1024)
+
+        self.dwLength = len(self)
+
 
 
 class WinKernel(Kernel):
@@ -2819,6 +2884,12 @@ class WinKernel(Kernel):
         self.last_error = 0
         self.mutexes = {}
         self.dllonexits = {}
+
+        # setup fake MEMORYSTATUS
+        self.memstatus = MEMORYSTATUS(psize=emu.psize)
+        # totally fake:
+        self.minwss = 0x100000
+        self.maxwss = 0x10000000
 
         # System Times  (starting times for an active system)
         self._idletime = kwargs.get('idletime', 0x27b25da9ec407)
@@ -3093,6 +3164,19 @@ class WinKernel(Kernel):
                 int(self._threadExitTime),
                 int(self._threadKernelTime),
                 int(self._threadUserTime))
+
+    def GetProcessWorkingSetSize(self, hProcess):
+        '''
+        Retrieves the minimum and maximum working set sizes of the specified process.
+        '''
+        return self.minwss, self.maxwss
+
+
+    def GlobalMemoryStatus(self):
+        '''
+        Retrieves information about the system's current usage of both physical and virtual memory.
+        '''
+        return self.memstat
 
     def QueryPerformanceCounter(self):
         '''
