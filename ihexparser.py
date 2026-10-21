@@ -62,7 +62,7 @@ class ihexbin:
                 newline = ""
                 if (secsize - secoffset < linesize):
                     bytestoprocess = secsize - secoffset
-                for x in xrange(bytestoprocess):
+                for x in range(bytestoprocess):
                     newline += "%.2X"%(ord(sec[2][x+secoffset]))
                 newline = ("%.2X%.4X%.2X%s"%(bytestoprocess, address, sec[1], newline))
                 chksm = (calculate_checksum(newline))
@@ -75,7 +75,7 @@ class ihexbin:
 
     def ihex_save(self, outf=sys.stdout, linesize = 32):
         for line in self.ihex_gen(linesize):
-            print >>outf,(line)
+            print((line), file=outf)
 
     def data_gen(self):
         address = self.startaddress
@@ -122,7 +122,7 @@ class ihexbin:
             same=False
             if skipsamelines and (inplen >= address+LINESIZE) and (address > LINESIZE):
                 same = True
-                for x in xrange(LINESIZE):
+                for x in range(LINESIZE):
                     if (lastline[x] != input[address+x]):
                         same = False
                         break
@@ -132,14 +132,14 @@ class ihexbin:
                 output += "%.8x  "%address
                 if (address + LINESIZE >= inplen):
                     LINESIZE = inplen - address
-                for x in xrange(LINESIZE/2):
+                for x in range(LINESIZE//2):
                     output += "%.2x "%ord(input[address + x])
                 output += " "
-                for x in xrange(LINESIZE/2, LINESIZE):
+                for x in range(LINESIZE//2, LINESIZE):
                     output += "%.2x "%ord(input[address + x])
                 if printText:
                     output += " |"
-                    for x in xrange(LINESIZE):
+                    for x in range(LINESIZE):
                         inpbyte = input[address+x]
                         ordnum = ord(inpbyte)
                         if (ordnum < 0x20 or ordnum > 0x7e):
@@ -169,7 +169,7 @@ class ihexbin:
         recordtype = -1
         bytes = ""
 
-        for line in xrange(len(self.lines)):
+        for line in range(len(self.lines)):
             start = self.lines[line][0]
             bytecount = int(self.lines[line][1:3],16)
             address = int(self.lines[line][3:7],16)
@@ -220,7 +220,7 @@ class ihexbin:
                         bytes = bytes[:offset]
                 else:                               # if it's the first line....
                     self.startaddress = address
-                for byte in xrange(0, bytecount):
+                for byte in range(0, bytecount):
                     ch = "%c"%(int(data[(byte*2):(byte*2)+2],16))
                     #print "Adding byte: %s"%data[byte*2:byte*2+2]
                     bytes += ch
@@ -241,7 +241,7 @@ def calculate_checksum(line):
     chksum = 0
     if len(line) and line[0] == ':':
         line = line[1:]
-    for x in xrange(0,len(line),2):
+    for x in range(0,len(line),2):
         #print "adding %s"%line[x:x+2]
         chksum += int(line[x:x+2],16)
     checksum = ((chksum ^ 0xff) +1) & 0xff

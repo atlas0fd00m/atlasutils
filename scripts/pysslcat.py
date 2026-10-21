@@ -11,7 +11,7 @@ import sys, os, select, socket
 
 
 if len(sys.argv) < 3:
-    print 'Usage: %s HOST PORT'%sys.argv[0]
+    print('Usage: %s HOST PORT'%sys.argv[0])
     sys.exit(1)
 
 
@@ -21,7 +21,7 @@ if len(sys.argv) < 3:
     #return ok
 
 def sendsock(sock,outinfo):
-    print >>sys.stderr,(">> %s"%repr(outinfo))
+    print((">> %s"%repr(outinfo)), file=sys.stderr)
     sock.sendall(outinfo)
 
 def readsock(sock):
@@ -36,7 +36,7 @@ def readsock(sock):
         return readstuff
             
     except SSL.Error:
-        print 'Connection died unexpectedly'
+        print('Connection died unexpectedly')
         x,y,z=sys.exc_info()
         sys.excepthook(x,y,z)
 
@@ -72,7 +72,7 @@ while 1:
     except SSL.ZeroReturnError:
         exit(0)
     except SSL.Error:
-        print 'Connection died unexpectedly'
+        print('Connection died unexpectedly')
         x,y,z=sys.exc_info()
         sys.excepthook(x,y,z)
         break

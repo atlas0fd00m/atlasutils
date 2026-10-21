@@ -21,7 +21,7 @@ else:
         port = int(sys.argv[2])
 
 def go(s):
-    print >>sys.stderr,("\n[+] Entering Interactive Shell...")
+    print(("\n[+] Entering Interactive Shell..."), file=sys.stderr)
     while True:
         x,y,z = select.select([sys.stdin, s],[],[],.1)
         if s in x:
@@ -30,7 +30,7 @@ def go(s):
             if all(c in string.printable for c in ch):
                 print(ch)
             else:
-                print "BIN:%s" % repr(ch)
+                print("BIN:%s" % repr(ch))
 
         if sys.stdin in x:
             ch = os.read(sys.stdin.fileno(), 1000)
@@ -63,7 +63,7 @@ s.connect((host,port))
 #if x:
 #	s.recv(65768)
 #else:
-#	print >>stderr, ('ERROR: Timed out waiting for response from server.')
+#print(('ERROR: Timed out waiting for response from server.'), file=stderr)
 
 
 go(s)

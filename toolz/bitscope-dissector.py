@@ -19,7 +19,7 @@ scope_dataset = [[] for x in range(8)]
 scope_metadata = [[] for x in range(8)]
 num_dataset = []
 
-for lnum in xrange(len(infile)):
+for lnum in range(len(infile)):
     line = infile[lnum].strip('\n').split(',')
     trigger,stamp,channel,index,type,delay,factor,rate,count = line[:9]
     data = line[9:]
@@ -32,7 +32,7 @@ for x in range(len(scope_dataset)) :
 
 
 for data in scope_dataset:
-    for x in xrange(len(data)):
+    for x in range(len(data)):
         if data[x] == '0':
             data[x] = 0
         elif data[x] == '5':
@@ -47,7 +47,7 @@ def get_bit_data(num_dataset, clk_tick=CLK_TICK, clock_idx=CLOCK):
     """
     bit_data = [[] for x in range(8)]
     prevclk = num_dataset[clock_idx][0]
-    for idx in xrange(len(num_dataset[clock_idx])):
+    for idx in range(len(num_dataset[clock_idx])):
         clk = num_dataset[clock_idx][idx]
         if clk != prevclk:
             prevclk = clk
@@ -83,11 +83,11 @@ def interp_jtag(tck=0,tms=1,tdo=2,tdi=3,jtag_state=0xf,clk_tick=CLK_TICK):
     global debug,IRI,IRO,DRI,DRO,num_dataset
     bit_data = get_bit_data(num_dataset, clk_tick, tck)
     data = []
-    for x in xrange(len(bit_data[tck])):
+    for x in range(len(bit_data[tck])):
         last_state = jtag_state
         jtag_state = jtag_states[jtag_state][bit_data[tms][x]]
         if debug: 
-            print >>sys.stderr,(bit_data[tms][x],jtag_state,jtag_states[jtag_state],bit_data[tdo][x])
+            print((bit_data[tms][x],jtag_state,jtag_states[jtag_state],bit_data[tdo][x]), file=sys.stderr)
             data.append("(%s)"%jtag_states[jtag_state][2])
 
         if last_state == 0x2:     # shift_dr
@@ -138,24 +138,24 @@ def interp_biwire(bit_data, clock_idx=CLOCK):
     bytes_rx=[]
     bytes_tx=[]
     try:
-        for x in xrange(0,len(bit_data[1][CLK_RX]), 8):
+        for x in range(0,len(bit_data[1][CLK_RX]), 8):
             num = 0
             for y in range(8):
                 num <<= 1
                 num += bit_data[1][CLK_RX][x+y]
             bytes_rx.append("%c"%num)
     except:
-        print sys.exc_info()        
+        print(sys.exc_info())
 
     try:
-        for x in xrange(0,len(bit_data[1][CLK_TX]), 8):
+        for x in range(0,len(bit_data[1][CLK_TX]), 8):
             num = 0
             for y in range(8):
                 num <<= 1
                 num += bit_data[1][CLK_TX][x+y]
             bytes_tx.append("%c"%num)
     except:
-        print sys.exc_info()        
+        print(sys.exc_info())
 
     return (bytes_rx, bytes_tx)
 #"".join(bytes_rx)
@@ -173,13 +173,13 @@ def get_bit_strings(bit_data):
 def stats(samplelist):
     results = []
     for x in range(len(stringslist)):
-        print "Sample %d"%x
+        print("Sample %d"%x)
         chars = {}
         for char in stringslist[x]:
             num = chars.setdefault(char,0) + 1
             chars[char] = num
         for char in chars.keys():
-            print " %s: %d"%(repr(char), chars[char])
+            print(" %s: %d"%(repr(char), chars[char]))
         results.append(chars)
     return results
     
@@ -216,7 +216,7 @@ def hexdump(input, LINESIZE=128, outfile = sys.stdout, bitsPerByte=8, startbits=
         same=False
         if skipsamelines and (inplen >= address+LINESIZE) and (address > LINESIZE):
             same = True
-            for x in xrange(LINESIZE):
+            for x in range(LINESIZE):
                 if (lastline[x] != input[address+x]):
                     same = False
                     break                    
@@ -227,7 +227,7 @@ def hexdump(input, LINESIZE=128, outfile = sys.stdout, bitsPerByte=8, startbits=
             if (address + LINESIZE >= inplen):
                 LINESIZE = inplen - address
             
-            for x in xrange(LINESIZE/2):
+            for x in range(LINESIZE//2):
                 bit = input[address + x]
                 output += "%x"%(bit)
                 if not bit:
@@ -248,7 +248,7 @@ def hexdump(input, LINESIZE=128, outfile = sys.stdout, bitsPerByte=8, startbits=
             if not keepgoin:
                 continue
             output += " "
-            for x in xrange(LINESIZE/2, LINESIZE):
+            for x in range(LINESIZE//2, LINESIZE):
                 bit = input[address + x]
                 output += "%x"%(bit)
                 if not bit:
@@ -269,7 +269,7 @@ def hexdump(input, LINESIZE=128, outfile = sys.stdout, bitsPerByte=8, startbits=
                 continue
             if printText:
                 output += " |"
-                for x in xrange(LINESIZE/bitsPerByte):
+                for x in range(LINESIZE/bitsPerByte):
                     inpbyte = b2B(input[address+x:address+x+bitsPerByte])
                     ordnum = (inpbyte)
                     if (ordnum < 0x20 or ordnum > 0x7e):

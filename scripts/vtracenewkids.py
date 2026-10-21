@@ -34,17 +34,17 @@ def go(stopOnExc=False):
 	    if not t.isAttached(): break
 
             try:
-	        print av.printStuff(t)
-            except Exception, e:
-                print e
+	        print(av.printStuff(t))
+            except Exception as e:
+                print(e)
 	    
             #fixme: if exception in tracer, drop to interactive mode
             if t.metadata['PendingSignal'] != None and stopOnExc:
-                print "Caught Signal, returning to interactive python (you did use -i or ipython, right?."
+                print("Caught Signal, returning to interactive python (you did use -i or ipython, right?.")
                 return 1
 
     except KeyboardInterrupt:
-	print "Caught Ctrl-C, returning to interactive python (if you ran it that way)."
+	print("Caught Ctrl-C, returning to interactive python (if you ran it that way).")
         t.sendBreak()
         t.running = False
 	return 1
@@ -62,7 +62,7 @@ def wait():
 
 	pid = None
 
-	print "waiting for new child..."
+	print("waiting for new child...")
 	while pid==None:
 		#print(repr(current))
 		for ppid,name in s.ps():
@@ -77,5 +77,5 @@ def wait():
 	print("Caught one.  Attaching to %d" % pid)
 
 
-print "wait() or rotate()"
+print("wait() or rotate()")
 

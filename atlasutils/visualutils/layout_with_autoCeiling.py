@@ -89,7 +89,7 @@ class Edge(cylinder):
         for node in nodepairtup:
             node.edges.append(self)
 
-        #print >>sys.stderr,("===== NEW EDGE CREATION ===== %s %s" % (nodepairtup))
+        #print(("===== NEW EDGE CREATION ===== %s %s" % (nodepairtup)), file=sys.stderr)
         self.updatePosition()
 
     def updatePosition(self):
@@ -140,21 +140,21 @@ class System:
         if self.edges.get(edge.nodes) != None:
             raise(Exception("FAIL!  this node exists: %s" % repr(edge)))
 
-        print >>sys.stderr,("adding new edge: %s" % repr(edge))
+        print(("adding new edge: %s" % repr(edge)), file=sys.stderr)
 
         self.edges[edge.nodes] = edge
         #self.adjust()
 
     def adjust(self):
         #go = True
-        #print >>sys.stderr,("adjusting system.")
+        #print(("adjusting system."), file=sys.stderr)
         #pendulum = .99
         #while go:
         #adjustment = vector(0,0,0)
         adjustment = 0
 
         for node in self.nodes.values():
-            #print >>sys.stderr, node
+            #print(node, file=sys.stderr)
             diff = node.applyForces()  # pendulum)
             adjustment += abs(diff)
 
@@ -164,7 +164,7 @@ class System:
         #if abs(value) <= STABILITY_CONST:
         #    go = False
         #else:
-        #    print >>sys.stderr,("adjusting system.  adjustment = %s" % repr(value))
+        #print(("adjusting system.  adjustment = %s" % repr(value)), file=sys.stderr)
         #    #sys.stdin.readline()
         #pendulum *= .99      # let's see how it does without this dampener
 
@@ -213,7 +213,7 @@ class CodeBlockNode(Node):
             # edge force should never be greater than distance...
             thisforce = ( f_dir * f_str )
             #thisforce = - ( EDGE_SPRING_COEFF * diff * (log( abs(diff) ) + 1) )
-            #print >>sys.stderr,("  EDGE: %x to %x:  diff=%s, absdiff=%s, dir=%s, str=%s, force=%s" % (self.ident, n.ident, diff, abs(diff), f_dir, f_str, thisforce))
+            #print(("  EDGE: %x to %x:  diff=%s, absdiff=%s, dir=%s, str=%s, force=%s" % (self.ident, n.ident, diff, abs(diff), f_dir, f_str, thisforce)), file=sys.stderr)
             force += (thisforce * coeff)
 
 
@@ -231,7 +231,7 @@ class CodeBlockNode(Node):
             if abs(thisforce) < 0.01:
                 thisforce = vector(0,0,0)
             #thisforce = NODE_FORCE_COEFF * diff / abs(diff)
-            #print >>sys.stderr,("  NODE: %x to %x:  npos=%s, diff=%s  abs(diff)=%s thisforce=%s dir=%s, str=%s velocity=%s" % 
+            #print(("  NODE: %x to %x:  npos=%s, diff=%s  abs(diff)=%s thisforce=%s dir=%s, str=%s velocity=%s" %, file=sys.stderr)
             #        (self.ident, n.ident, n.pos, diff, abs(diff), thisforce, f_dir, f_str, self.velocity))
             force += (thisforce * coeff)
 
@@ -259,7 +259,7 @@ class CodeBlockNode(Node):
                 self.velocity.y = 0
                 force.y = 0
 
-        #print >>sys.stderr,("  TOTAL FORCE: %s (%s)" % (force, abs(force)))
+        #print(("  TOTAL FORCE: %s (%s)" % (force, abs(force))), file=sys.stderr)
         
         # friction (yes, in free-fall in the air...  sue me
         force += FRICTION_COEFF *  -( self.velocity )
@@ -281,7 +281,7 @@ class CodeBlockNode(Node):
 
 def test(system):
     last = None
-    for x in xrange(0x8048000, 0x8058000, 0x1000):
+    for x in range(0x8048000, 0x8058000, 0x1000):
         n = CodeBlockNode(system, x)
         system.addNode(n)
         if last != None:

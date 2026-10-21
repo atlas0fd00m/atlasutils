@@ -41,8 +41,8 @@ def recurseConnectedChain(me, address, end, chunks, finished=0):
         try:
             #print " Calling Recurse again..."
             finished += (recurseConnectedChain(me, address+chunk, end, chunks))
-        except Exception,e:
-            print "ERROR: %s "%e
+        except Exception as e:
+            print("ERROR: %s "%e)
             return 1
     return finished +1
 
@@ -50,7 +50,7 @@ def recurseConnectedChain(me, address, end, chunks, finished=0):
 
 def findNextHeap(me, address):
     chain = getConnectedChain(me)
-    for x in xrange(1,len(chain)):
+    for x in range(1,len(chain)):
         if chain[x] > address and chain[x-1] <= address:
             return chain[x]
 

@@ -42,12 +42,12 @@ def dumpTree(subtree, title="TREE:", outf = sys.stdout, ignore=(), deep=False, c
         dumpTree(mystrucureobject, "WEIRDO TREE", outf = file("dumptree.out","w"))
     """
     if (type(subtree) == list or type(subtree) == tuple):
-        print >>outf,("%s: (%s)"%(title,type(subtree)))
+        print(("%s: (%s)"%(title,type(subtree))), file=outf)
         for item in range(len(subtree)):
             dumpTree(subtree[item], "%s:[%d]"%(title,item), outf, ignore)
 
     elif (type(subtree) == dict):
-        print >>outf,("%s: (%s)"%(title,type(subtree)))
+        print(("%s: (%s)"%(title,type(subtree))), file=outf)
         for i in (subtree).keys():
             istr = repr(i)
             if istr in ignore:
@@ -56,7 +56,7 @@ def dumpTree(subtree, title="TREE:", outf = sys.stdout, ignore=(), deep=False, c
             dumpTree(item, "%s:%s"%(title,istr), outf, ignore)
 
     elif (repr(type(subtree)) == "<type 'instance'>"):
-        print >>outf,("%s: (%s)"%(title,type(subtree)))
+        print(("%s: (%s)"%(title,type(subtree))), file=outf)
         if cb:
             cb(title, subtree)
 
@@ -77,11 +77,11 @@ def dumpTree(subtree, title="TREE:", outf = sys.stdout, ignore=(), deep=False, c
 
     else:
         if (type(subtree) == str and len(subtree)>40):
-            print >>outf,("%s %s == %s ..... (size = %d bytes)"%(title, type(subtree), subtree[:40], len(subtree)))
+            print(("%s %s == %s ..... (size = %d bytes)"%(title, type(subtree), subtree[:40], len(subtree))), file=outf)
         elif (type(subtree) == int):
-            print >>outf,("%s %s == 0x%x "%(title, type(subtree), subtree))
+            print(("%s %s == 0x%x "%(title, type(subtree), subtree)), file=outf)
         else:
-            print >>outf,("%s %s == %s "%(title, type(subtree), subtree))
+            print(("%s %s == %s "%(title, type(subtree), subtree)), file=outf)
 
 """
 >>> for i in \

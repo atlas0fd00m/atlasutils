@@ -12,7 +12,7 @@ def dumpFunc(vw, fva, filename):
         va = bva
         while va < eva:
             op = vw.parseOpcode(va)
-            print op
+            print(op)
             o.append(str(op))
             va += len(op)
             

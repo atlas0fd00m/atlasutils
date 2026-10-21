@@ -37,7 +37,7 @@ def testColorChangePoints(color):
     global pts
     start = time.time()
     colors = pts.get_color()
-    for cidx in xrange(len(colors)):
+    for cidx in range(len(colors)):
         colors[cidx] = color
     stop = time.time()
     return stop-start

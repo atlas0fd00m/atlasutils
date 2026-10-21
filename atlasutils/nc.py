@@ -145,7 +145,7 @@ class wratchet:
 		if (self.rport): 
 			port = self.rport
 		buf = data
-		print ("%s %d"%(addr,port))
+		print(("%s %d"%(addr,port)))
 		while (len(buf) > 16384):
 			self.s.sendto(buf[:16384], (addr,port))
 			buf = buf[16384:]
@@ -182,7 +182,7 @@ class wratchet:
 	def recvFILE(self,size=1000000):
 		data = read(self.fd, size)
 		if INTERACTIVE and self.isStdin:
-			#print >>sys.stderr,('INTERACTIVE')
+			#print(('INTERACTIVE'), file=sys.stderr)
 			return(eval('"%s"'%data.strip())+'\n')
 		return data
 		
@@ -237,7 +237,7 @@ def manageConn(wrcht1, wrcht2, wait = None):
 				break
 			select([],[],[], .1)
 	except: 
-		print >>sys.stderr,("Score!!")
+		print(("Score!!"), file=sys.stderr)
 		try:
 			sys.excepthook(sys.exc_info()[0],sys.exc_info()[1],sys.exc_info()[2])
 			wrcht1.close()
@@ -249,7 +249,7 @@ def manageConn(wrcht1, wrcht2, wait = None):
 ##################################################
 
 def syntax():
-	print """
+	print("""
 netcat on python... a crushing experience.  (ver %s)
 
 Syntax:   %s  [-v] [-I] [-l] [-L] [-u] [-p port] [-P proto] [-e cmd] [host [port]]
@@ -263,7 +263,7 @@ Syntax:   %s  [-v] [-I] [-l] [-L] [-u] [-p port] [-P proto] [-e cmd] [host [port
 	-p port		set local port
 	-P proto	use protocol 'proto' (RAW Sockets, must have rights)
 
-"""%(VER, sys.argv[0])
+""" % (VER, sys.argv[0]))
 	sys.exit(1)
 
 ### TCP server -e
@@ -396,7 +396,7 @@ if __name__ == "__main__":
 		if (PROTO == 6): 
 			s = socket()
 			if (LISTEN):
-				if (VERBOSE): 	print >>sys.stderr,("listening on [%s] %d ..."%(LHOST,LPORT))
+				if (VERBOSE): 	print(("listening on [%s] %d ..."%(LHOST,LPORT)), file=sys.stderr)
 				s.setsockopt(SOL_SOCKET,SO_REUSEADDR,1)
 				s.bind((LHOST,LPORT))
 				s.listen(10000)
@@ -405,11 +405,11 @@ if __name__ == "__main__":
 				a.setsockopt(SOL_SOCKET,SO_REUSEADDR,1)
 				RA,RP = addy
 				so = wratchet(a, LHOST,LPORT, RA, RP)
-				if (VERBOSE):	print >>sys.stderr,("connect to [%s] from localhost.localdomain [%s] %d"%(s.getsockname(),RA,RP))
+				if (VERBOSE):	print(("connect to [%s] from localhost.localdomain [%s] %d"%(s.getsockname(),RA,RP)), file=sys.stderr)
 
 
 			else:
-				if (VERBOSE):   print >>sys.stderr,("%s %s"%(RHOST,RPORT))
+				if (VERBOSE):   print(("%s %s"%(RHOST,RPORT)), file=sys.stderr)
 				s.connect((RHOST,RPORT))
 				so = wratchet(s, LHOST,LPORT, RHOST,RPORT)
 				
@@ -420,10 +420,10 @@ if __name__ == "__main__":
 			so.makeUDP()
 			s.bind(("0.0.0.0",LPORT))
 			if (LISTEN):	
-				if (VERBOSE): 	print >>sys.stderr,("listening on [%s] %d ..."%(LHOST,LPORT))
+				if (VERBOSE): 	print(("listening on [%s] %d ..."%(LHOST,LPORT)), file=sys.stderr)
 				while (not so.select(.1)): pass
 			else:
-				if (VERBOSE):   print >>sys.stderr,("%s %s"%(RHOST,RPORT))
+				if (VERBOSE):   print(("%s %s"%(RHOST,RPORT)), file=sys.stderr)
 				
 				
 			
@@ -432,10 +432,10 @@ if __name__ == "__main__":
 			so = wratchet(s,LHOST,LPORT,RHOST,RPORT,PROTO)
 			so.makeRAW()
 			if (LISTEN):
-				if (VERBOSE): 	print >>sys.stderr,("listening on [%s] protocol %d ..."%(LHOST,PROTO))
+				if (VERBOSE): 	print(("listening on [%s] protocol %d ..."%(LHOST,PROTO)), file=sys.stderr)
 				while (not so.select(.1)): pass
 			else:
-				if (VERBOSE):   print >>sys.stderr,("%s %s"%(RHOST,PROTO))
+				if (VERBOSE):   print(("%s %s"%(RHOST,PROTO)), file=sys.stderr)
 	
 		lso = wratchet()
 		

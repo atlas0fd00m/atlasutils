@@ -29,7 +29,7 @@ def vizFuncs(vw, FACTOR = 10, diam=0.5, l=None,w=None,h=None):
     if floor != None:
         floor = box (pos=(0,0,0), length=width*FACTOR, height=0.5, width=width*FACTOR, color=color.blue)
 
-    for fidx in xrange(len(funcvas)):
+    for fidx in range(len(funcvas)):
         funcva = funcvas[fidx]
         y = (height - int(fidx / layersize)) * FACTOR   #FIXME: should be int() but we're going to play..
         l = (fidx % layersize)
@@ -66,7 +66,7 @@ def colorize():
 
     items = funcballs.items()
     items.sort()
-    for fidx in xrange(len(items)):
+    for fidx in range(len(items)):
         funcva, funcb = items[fidx]
         y = (height - (fidx / layersize)) * FACTOR   #FIXME: should be int() but we're going to play..
         l = (fidx % layersize)
@@ -98,12 +98,12 @@ def mouseplay():
         rate(100)
         if scene.mouse.events:
             event = scene.mouse.getevent()
-            print repr(vars(event))
+            print(repr(vars(event)))
             mouse = scene.mouse.getclick()
             obj = mouse.pick
             #if mouse.
             if obj != None and obj.radius != None:
-                print "radius = %f" % obj.radius
+                print("radius = %f" % obj.radius)
                 obj.radius = (3,5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1) [int(obj.radius)]
             #else:
             #    obj.radius = 2

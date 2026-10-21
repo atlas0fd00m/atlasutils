@@ -14,26 +14,26 @@ app='kcalc'
 
 if len(argv) > 1:
     app=argv[1]
-print >>stderr,("Starting Test of Visigoth's Vtrace against '%s' (assuming you have started %s)"%(app,app))
-print >>stderr,("* Attaching to first instance of %s"%app)
+print(("Starting Test of Visigoth's Vtrace against '%s' (assuming you have started %s)"%(app,app)), file=stderr)
+print(("* Attaching to first instance of %s"%app), file=stderr)
 me = atch(app)
 me.registerNotifier(vtrace.NOTIFY_ALL, VerboseNotifier())
 
 
-print >>stderr,("\n\n\n* stepi() (100 times fast)")
+print(("\n\n\n* stepi() (100 times fast)"), file=stderr)
 for i in range (100):
     me.stepi()
     
-print >>stderr,("\n\n\n= setting NonBlocking to True")
+print(("\n\n\n= setting NonBlocking to True"), file=stderr)
 me.setMode("NonBlocking", True)
 
-print >>stderr,("* run()")
+print(("* run()"), file=stderr)
 me.run()
 
-print >>stderr,("     (sleep for 10 secs)")
+print(("     (sleep for 10 secs)"), file=stderr)
 select.select([],[],[],10)
 
-print >>stderr,("* sendBreak()")
+print(("* sendBreak()"), file=stderr)
 me.sendBreak()
 select.select([],[],[],.5)
 print(me)
@@ -45,7 +45,7 @@ while (me.getProgramCounter() > 0xf0000000):
 for i in range(100):
     eip = me.getProgramCounter()
     if (eip < 0xf0000000):
-        print >>stderr,("\n* addBreakpoint(DisplayBreaker(0x%x))"%eip)
+        print(("\n* addBreakpoint(DisplayBreaker(0x%x))"%eip), file=stderr)
         try:
             me.addBreakpoint(DisplayBreaker(eip))
             #me.addBreakpoint(Breakpoint(eip))
@@ -54,12 +54,12 @@ for i in range(100):
             excepthook(a,b,c)
     me.stepi()
 
-print >>stderr,("= setting RunForever to True")
+print(("= setting RunForever to True"), file=stderr)
 me.setMode("RunForever", True)
 
-print >>stderr,("* run()")
+print(("* run()"), file=stderr)
 me.run()
 
-print >>stderr,("     (sleep for 120 secs)")
+print(("     (sleep for 120 secs)"), file=stderr)
 select.select([],[],[],120)
 

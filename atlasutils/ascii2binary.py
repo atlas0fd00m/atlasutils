@@ -22,7 +22,7 @@ def bin2ascii(binarystr, LSB=True, one='1', zero='0'):
     while (x < len(binarystr)-1):
         byt = 0
         offset = 0
-        for ci in xrange(8):
+        for ci in range(8):
             try:
                 i = binarystr[x+offset+ci]
                 while i not in [one, zero]:
@@ -31,8 +31,8 @@ def bin2ascii(binarystr, LSB=True, one='1', zero='0'):
                 byt *= 2
                 if i == one:  
                     byt += 1
-            except Exception,e:
-                print >>sys.stderr,("Error '%s'...  Problems in char %s.  Not binary?  Should be either a '0' or a '1'"%(e,i))
+            except Exception as e:
+                print(("Error '%s'...  Problems in char %s.  Not binary?  Should be either a '0' or a '1'"%(e,i)), file=sys.stderr)
                 
         output += chr(byt)
         x += 8 + offset

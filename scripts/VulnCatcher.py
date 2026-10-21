@@ -117,7 +117,7 @@ class TestBreakpointSubscriber():
         self.cont = True
         self.events = {}
         self.maxthreads = 1
-        for x in xrange(self.maxthreads):
+        for x in range(self.maxthreads):
             t = Thread(target=self.notifythread)
             t.setDaemon(True)
             t.start()
@@ -143,7 +143,7 @@ class TestBreakpointSubscriber():
             except:
                 time.sleep(.1)
                 continue
-            print >>stderr,("Notify: %s\n%s"%(work.message, hexText(work.data)))
+            print(("Notify: %s\n%s"%(work.message, hexText(work.data))), file=stderr)
             key = "%s:%s"%(work.location, work.dest)
             store = self.events.get(key, None)
             if store == None:
@@ -224,14 +224,14 @@ class MemcpyBreaker(BOFBreakpoint):
         destlen = 0
         
         mmap = trace.getMap(dest)
-        #print >>stderr,(mmap[3])
+        #print((mmap[3]), file=stderr)
         if ('[stack]' == mmap[3]):
             
             destlen = findRET(trace, dest) - dest
-            #print >>stderr,("%x"%destlen)
+            #print(("%x"%destlen), file=stderr)
         elif ('[heap]' == mmap[3]):
             destlen = getHeapLen(trace, dest)
-            #print >>stderr,("%x"%destlen)
+            #print(("%x"%destlen), file=stderr)
         else:
             destlen = ebp - dest
         
@@ -449,7 +449,7 @@ if __name__ == "__main__" and len(argv) > 1:
     elif len(argv) == 2:
         me.execute(argv[1])
     else:
-        print ("Syntax:   %s <binary> [pid]"%argv[0])
+        print(("Syntax:   %s <binary> [pid]"%argv[0]))
         exit(1)
     #verbose = True
     me.registerNotifier(vtrace.NOTIFY_BREAK, VerboseNotifier())
@@ -476,11 +476,11 @@ for x in range(256):
   op=Opcode('\xff%cAAAAAAA'%x)
   if op.printOpcode(0)[0] == 'c':
     lens[op.off] = op
-    print "%d:  %s  %s"%(x,hexText(op.data),op.printOpcode(0))
+    print("%d:  %s  %s"%(x,hexText(op.data),op.printOpcode(0)))
 
 
 for x in lens.keys():
-  print "%d:  %s  %s"%(x,hexText(lens[x].data),lens[x].printOpcode(0))
+  print("%d:  %s  %s"%(x,hexText(lens[x].data),lens[x].printOpcode(0)))
 
 
 
@@ -490,7 +490,7 @@ sz=0xfffff
 off=0
 heap= 134557696
 while sz != 0:
-    print XW(me,heap+off,8)
+    print(XW(me,heap+off,8))
     sz = me.readMemoryFormat(heap+off+4,"L")[0]
     off += (sz &0xfffffffe)
 

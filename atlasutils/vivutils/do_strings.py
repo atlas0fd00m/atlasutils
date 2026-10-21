@@ -1,5 +1,5 @@
 def doStrings(start, end, minbytes=4):
-    print "%x -> %x" % (start, end)
+    print("%x -> %x" % (start, end))
     last = None
     va = start
     while va < end:
@@ -23,7 +23,7 @@ def doStrings(start, end, minbytes=4):
                 else:
                     x += 1
         va += 1
-    print "done"
+    print("done")
 
 
 if 'vw' in globals().keys():

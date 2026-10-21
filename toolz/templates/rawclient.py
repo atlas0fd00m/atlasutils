@@ -6,7 +6,7 @@ from sys import *
 PROTOCOL = 'chaos'
 
 if len(argv) < 2:
-	print >>stderr,("Syntax:  %s host [protocol]"%argv[0])
+	print(("Syntax:  %s host [protocol]"%argv[0]), file=stderr)
 	exit(1)
 
 
@@ -28,8 +28,8 @@ def send(host, data):
 
 def recv():
 	data,sender = sock.recvfrom(2000)
-	print "got %d bytes from %s" % (len(data), repr(sender))
-	print "DATA: %s" % (repr(data))
+	print("got %d bytes from %s" % (len(data), repr(sender)))
+	print("DATA: %s" % (repr(data)))
 
 
 sock = socket(AF_INET, SOCK_RAW, getprotobyname(proto))

@@ -12,4 +12,4 @@ for i in s:
  out += chr(nextchar)
  p +=1
 
-print out
+print(out)

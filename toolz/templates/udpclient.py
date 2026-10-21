@@ -32,6 +32,6 @@ while (cycle):
 		(input,addy) = s.recvfrom(2000)
 		print("(%s) %s"%(addy,input))
 		if (len(input) ==0): cycle = False
-	#print >>stderr,(".")
+	#print(("."), file=stderr)
 
 s.close()

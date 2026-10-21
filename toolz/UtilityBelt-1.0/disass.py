@@ -20,7 +20,7 @@ import re
 VER=1.1 
 
 if (len(sys.argv) < 2):
-  print >>sys.stderr, """
+  print(""", file=sys.stderr)
 disass v%0.2f Disassembling enhancer
 
 Syntax:  %s <binary-to-disass>

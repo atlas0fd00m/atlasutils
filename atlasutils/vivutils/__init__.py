@@ -43,7 +43,7 @@ def cleanVW(vw, filename=None):
     for loctup in vw.loclist:
         lva, lsize, ltype, linfo = loctup
         if loctup not in vw2.loclist:
-            for nltidx in xrange(len(vw2.loclist)):
+            for nltidx in range(len(vw2.loclist)):
                 nlt = vw2.loclist[nltidx]
                 nva, nsize, ntype, ninfo = nlt
                 if nva == lva:

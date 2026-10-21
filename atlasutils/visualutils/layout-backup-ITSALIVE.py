@@ -90,7 +90,7 @@ class Edge(cylinder):
         for node in nodepairtup:
             node.edges.append(self)
 
-        print >>sys.stderr,("===== NEW EDGE CREATION ===== %s %s" % (nodepairtup))
+        print(("===== NEW EDGE CREATION ===== %s %s" % (nodepairtup)), file=sys.stderr)
         self.updatePosition()
 
     def updatePosition(self):
@@ -133,21 +133,21 @@ class System:
         if self.edges.get(edge.nodes) != None:
             raise(Exception("FAIL!  this node exists: %s" % repr(edge)))
 
-        print >>sys.stderr,("adding new edge: %s" % repr(edge))
+        print(("adding new edge: %s" % repr(edge)), file=sys.stderr)
 
         self.edges[edge.nodes] = edge
         #self.adjust()
 
     def adjust(self):
         #go = True
-        print >>sys.stderr,("adjusting system.")
+        print(("adjusting system."), file=sys.stderr)
         #pendulum = .99
         #while go:
         #adjustment = vector(0,0,0)
         adjustment = 0
 
         for node in self.nodes.values():
-            print >>sys.stderr, node
+            print(node, file=sys.stderr)
             diff = node.applyForces()  # pendulum)
             adjustment += abs(diff)
 
@@ -157,7 +157,7 @@ class System:
         #if abs(value) <= STABILITY_CONST:
         #    go = False
         #else:
-        #    print >>sys.stderr,("adjusting system.  adjustment = %s" % repr(value))
+        #print(("adjusting system.  adjustment = %s" % repr(value)), file=sys.stderr)
         #    #sys.stdin.readline()
         #pendulum *= .99      # let's see how it does without this dampener
 
@@ -202,7 +202,7 @@ class VivNode(Node):
             f_str = EDGE_FORCE_COEFF * ( 1 + math.log(abs(diff), EDGE_FORCE_BASE) )
             thisforce = ( f_dir * f_str )
             #thisforce = - ( EDGE_SPRING_COEFF * diff * (log( abs(diff) ) + 1) )
-            print >>sys.stderr,("  EDGE: %x to %x:  diff=%s, absdiff=%s, dir=%s, str=%s, force=%s" % (self.ident, n.ident, diff, abs(diff), f_dir, f_str, thisforce))
+            print(("  EDGE: %x to %x:  diff=%s, absdiff=%s, dir=%s, str=%s, force=%s" % (self.ident, n.ident, diff, abs(diff), f_dir, f_str, thisforce)), file=sys.stderr)
             force += (thisforce * coeff)
 
 
@@ -218,7 +218,7 @@ class VivNode(Node):
             f_str = NODE_FORCE_COEFF / abs(diff)
             thisforce = - ( f_dir * f_str )
             #thisforce = NODE_FORCE_COEFF * diff / abs(diff)
-            print >>sys.stderr,("  NODE: %x to %x:  npos=%s, diff=%s  abs(diff)=%s thisforce=%s dir=%s, str=%s velocity=%s" % 
+            print(("  NODE: %x to %x:  npos=%s, diff=%s  abs(diff)=%s thisforce=%s dir=%s, str=%s velocity=%s" %, file=sys.stderr)
                     (self.ident, n.ident, n.pos, diff, abs(diff), thisforce, f_dir, f_str, self.velocity))
             force += (thisforce * coeff)
 
@@ -261,7 +261,7 @@ class VivNode(Node):
 
 
 def test(system):
-    for x in xrange(0x8048000, 0x8058000, 0x1000):
+    for x in range(0x8048000, 0x8058000, 0x1000):
         n = VivNode(system, x)
         system.addNode(n)
         if len(system.nodes) > 1:

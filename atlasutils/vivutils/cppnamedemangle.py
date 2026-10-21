@@ -13,14 +13,14 @@ from vivisect import L_LTYPE, LOC_IMPORT
 lib = cutil.find_library("stdc++")
 
 def convertGCC_old(mangled):
-    print "converting:  ", mangled
+    print("converting:  ", mangled)
     libstdc = CDLL(lib)
     mbuf = c_buffer(mangled, 1000)
     status = c_int(0)
     nptr = libstdc.__cxa_demangle(mbuf, None, None, byref(status))
 
     if status.value != 0:
-        print "Error: status: %s" % status
+        print("Error: status: %s" % status)
 
     name = c_char_p(nptr)
     if name.value != None:
@@ -32,7 +32,7 @@ if globals().get('argv'):
     curdir = os.path.dirname(os.path.abspath(argv[0]))
 else:
     curdir = os.path.dirname(os.path.abspath(sys.argv[0]))
-print curdir
+print(curdir)
 
 
 VCFILT = os.path.join(curdir, 'vc++filt.exe')
@@ -42,7 +42,7 @@ def convertVCPP(mangled):
     p.stdin.write("%s\n" % mangled)
     p.stdin.close()
     newname = p.stdout.read().strip()
-    print newname
+    print(newname)
     if newname != mangled:
         return newname
 ''' stolen from:    http://stackoverflow.com/questions/6526500/c-name-mangling-library-for-python
@@ -59,7 +59,7 @@ def demangle(names):
     assert len(demangled) == len(names)+1
     return demangled[:-1]
 
-print demangle(['_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEE17_M_stringbuf_initESt13_Ios_Openmode',
+print(demangle(['_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEE17_M_stringbuf_initESt13_Ios_Openmode',)
     '_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEE6setbufEPci'])
 '''
 
@@ -125,8 +125,8 @@ def demangle(va, vaname, filefmt, files=[]):
             newname = modname + '.' + cxxfilt.demangle(workname)
             #print "%r -> %r" % (workname, newname)
 
-    except Exception, e:
-        print "error demangling (%r): %r" % (workname, e)
+    except Exception as e:
+        print("error demangling (%r): %r" % (workname, e))
     finally:
         return prefix, newname, suffix
 
@@ -177,11 +177,11 @@ def analyze(vw, vwnm=None, normalize=False):
             vw.makeName(va, str(fname))
             vw.setComment(va, newname)
             if args != None:
-                print "FIXME: update Function Args/Prototype"
+                print("FIXME: update Function Args/Prototype")
 
             loc = vw.getLocation(va)
             if loc != None and loc[L_LTYPE] == LOC_IMPORT:
-                print "WTF is this?  LOC_IMPORT... but handler is f'd"
+                print("WTF is this?  LOC_IMPORT... but handler is f'd")
                 vw.addLocation(*loc[:3], tinfo=fname)
 
         except:
@@ -204,7 +204,7 @@ def normFuncName(funcname):
 
     lastcok = False
     chars = list(normname)
-    for i in xrange(len(chars)):
+    for i in range(len(chars)):
         if chars[i] not in ok:
             if chars[i] in cok:
                 x = "%.2X" % ord(chars[i])
@@ -236,7 +236,7 @@ def normFuncName(funcname):
 def vivDemangleOne(vw):
     try:
         name = cxxfilt.demangle(name)
-    except Exception, e:
+    except Exception as e:
         vw.vprint('Error demangling %r: %r' % (name, e))
         return
 

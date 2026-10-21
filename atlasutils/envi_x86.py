@@ -21,10 +21,10 @@ def disass(bytes):
         while True:
             op = a.makeOpcode(bytes, offset)
             nibble = bytes[offset:offset+len(op)]
-            print "%8x\t%-20s\t%.20s"%(offset, nibble.encode('hex'), op)
+            print("%8x\t%-20s\t%.20s"%(offset, nibble.hex(), op))
             offset += len(op)
-    except Exception, e:
-        print "ERROR OCCURRED: %s" % repr(e)
+    except Exception as e:
+        print("ERROR OCCURRED: %s" % repr(e))
 
 class SuccessfulRunException(Exception): pass
 
@@ -45,15 +45,15 @@ class IEmulator(x86emu.IntelEmulator):
 
     def run(self, stepcount=None, tova=None):
 
-        print self
+        print(self)
         if stepcount != None:
-            for i in xrange(stepcount):
+            for i in range(stepcount):
                 try:
                     self.stepi()
                     if tova is not None and self.getProgramCounter() == tova:
                         raise(SuccessfulRunException("Found VA"))
-                except SuccessfulRunException, e:
-                    print e
+                except SuccessfulRunException as e:
+                    print(e)
                     return
         else:
             while True:
@@ -61,14 +61,14 @@ class IEmulator(x86emu.IntelEmulator):
                     self.stepi()
                     if tova is not None and self.getProgramCounter() == tova:
                         raise(SuccessfulRunException("Found VA"))
-                except SuccessfulRunException, e:
-                    print e
+                except SuccessfulRunException as e:
+                    print(e)
                     return
 
 
     def stepi(self):
         x86emu.IntelEmulator.stepi(self)
-        print self
+        print(self)
 
     def __str__(self):
         return self.getString()
@@ -88,13 +88,13 @@ class IEmulator(x86emu.IntelEmulator):
         output.append("\nesp: (%x)\n" % esp)
         try:
             output.append( me.XW(esp, 64, width) )
-        except Exception, e:
+        except Exception as e:
             output.append("ERROR READING FROM MEMORY AT %x\n"%(esp) + repr(e))
         
         output.append( "\nebp-92: " + "(%x)\n" % esp )
         try:
             output.append(me.XW(ebp-92, 64, width))
-        except Exception, e:
+        except Exception as e:
             output.append("ERROR READING FROM MEMORY AT %x\n"%(ebp-92) + repr(e))
         
         for i in ['eax','ecx','edx','ebx','esi','edi']:
@@ -105,7 +105,7 @@ class IEmulator(x86emu.IntelEmulator):
         for oidx in range(len(op.opers)):
             try:
                 opers.append("(%x)" % me.getOperAddr(op, oidx))
-            except Exception,e:
+            except Exception as e:
                 pass#print e
             opers.append(hex(me.getOperValue(op, oidx)))
         cmd = ' '.join(opers)
@@ -147,10 +147,10 @@ if __name__ == '__main__':
         offset = int(sys.argv.pop(1))
 
     if len(sys.argv) > 1:
-        print "Reading instructions from file %s"%sys.argv[1]
+        print("Reading instructions from file %s"%sys.argv[1])
         inf = file(sys.argv[1], "rb")
     else:
-        print "Reading instructions from stdin..."
+        print("Reading instructions from stdin...")
         inf = sys.stdin
 
     bytes = inf.read()

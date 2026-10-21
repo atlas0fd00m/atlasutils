@@ -43,11 +43,11 @@ class vCard(dict):
             #print shortline
             if (shortline == "BEGIN:VCARD" and idx > 0
                     or shortline == "END:VCARD"):
-                print "Found a new card... returning..."
+                print("Found a new card... returning...")
                 return idx
             
             if (last != None and len (line)>0 and line[0] == " "):
-                print "passing:  ==%s=="%line
+                print("passing:  ==%s=="%line)
                 pass  # assume the whole thing is read in correctly with the key
             
             elif (shortline.find(":") > -1):  # make sure it's got a key:value pair
@@ -60,7 +60,7 @@ class vCard(dict):
                 
                 tpi = idx+1
                 while (tpi < llen and len(lines[tpi])>0 and lines[tpi][0] == " "):
-                    print "appending '%s'"%lines[tpi]
+                    print("appending '%s'"%lines[tpi])
                     values.append(lines[tpi].rstrip()) 
                     tpi +=1
                 
@@ -70,15 +70,15 @@ class vCard(dict):
             
             
     def push(self, key, value):
-        if (key.upper() in UNIQ_KEYS and self.has_key(key)):
-            print >>sys.stderr,"Ignoring (already present): %s:%s"%(key,value)
+        if (key.upper() in UNIQ_KEYS and key in self):
+            print("Ignoring (already present): %s:%s"%(key,value), file=sys.stderr)
         else:
             cur = self.get(key,[])
             cur.append(value)
             self[key] = cur
         
     def pop(self, key):
-        if self.has_key(key):
+        if key in self:
             return dict.pop(self, key, 0)
         else:
             raise(Exception("Hey!  No key like that here!  (%s)"%key))
@@ -86,23 +86,23 @@ class vCard(dict):
     def __repr__(self):
         workself = copy.copy(self)
         
-        if workself.has_key("BEGIN"):
+        if "BEGIN" in workself:
             begin = workself.pop("BEGIN")
             output = [ "BEGIN:"+begin[0], ]
         else:
             output = [ "BEGIN:VCARD", ]
         
-        if workself.has_key("CLASS"):
+        if "CLASS" in workself:
             cls = workself.pop("CLASS")
             output.append("CLASS:"+cls[0])
 
-        if workself.has_key("END"):
+        if "END" in workself:
             endstuff = "END:"+workself.pop("END")[0].strip()+"\n\n"
         #else:
         endstuff = "END:VCARD\n\n"
         
         # Now put the lion-share on there    
-        for key,values in workself.iteritems():
+        for key,values in workself.items():
             for value in values:
                 output.append(key+":"+value)
             
@@ -110,7 +110,7 @@ class vCard(dict):
         return '\n'.join(output)
         
     def merge(self, ovcard):
-        for key,values in ovcard.iteritems():
+        for key,values in ovcard.items():
             for value in values:
                 self.push(key,value)
 
@@ -118,7 +118,7 @@ class vCard(dict):
     def compare(self, ovcard):
         same = False
         # Compare "N"
-        if self.has_key("N") and ovcard.has_key("N"):
+        if "N" in self and "N" in ovcard:
             myln,myfn = self["N"][0].upper().split(";")[:2]
             oln,ofn = ovcard["N"][0].upper().split(";")[:2]
             
@@ -127,10 +127,10 @@ class vCard(dict):
                 # Make sure the last and first names match
                 if myln == oln and myfn == ofn:
                     same = True
-                    print >>sys.stderr,"Match N"
+                    print("Match N", file=sys.stderr)
                 
         # Compare "FN"
-        if self.has_key("FN") and ovcard.has_key("FN"):
+        if "FN" in self and "FN" in ovcard:
             myname = FNparse(self["FN"][0]).upper()
             oname = FNparse(ovcard["FN"][0]).upper()
             
@@ -139,11 +139,11 @@ class vCard(dict):
                 # Make sure the last and first names match
                 if myname == oname:
                     same = True
-                    print >>sys.stderr,"Match FN"
+                    print("Match FN", file=sys.stderr)
                 
             
         # Compare "EMAIL"  (NOTE: Not Unique!)
-        if self.has_key("EMAIL") and ovcard.has_key("EMAIL"):
+        if "EMAIL" in self and "EMAIL" in ovcard:
             myemails = self["EMAIL"]
             omails  = ovcard["EMAIL"]
             
@@ -151,7 +151,7 @@ class vCard(dict):
                 for omail in omails:
                     if email == omail:
                         same = True
-                        print >>sys.stderr,"Match Email"
+                        print("Match Email", file=sys.stderr)
         
             
         # Compare "TEL;"s
@@ -174,7 +174,7 @@ class vCard(dict):
             for otel in otels:
                 if tel == otel:
                     same = True
-                    print >>sys.stderr,"Match Telephone"
+                    print("Match Telephone", file=sys.stderr)
         return same
 
 
@@ -208,7 +208,7 @@ def readCard(filepath):
             clen = vc.parse(fin[count:])
             count += clen
             cards.append(vc)
-        print vc
+        print(vc)
         return vc
         
 def compress(cards):
@@ -217,22 +217,22 @@ def compress(cards):
         cur = cards[cidx]
         for tcard in cards[:cidx]:
             if (cur.compare(tcard)):
-                print >>sys.stderr,"Merging!"
+                print("Merging!", file=sys.stderr)
                 tcard.merge(cur)
                 didxs.insert(0,cidx)
                 cards[cidx].DELETE = True
                 break
-    print >>sys.stderr,"Number of cards before compression: %d"%len(cards)
-    print >>sys.stderr,"Number of cards to delete: %d"%len(didxs)
+    print("Number of cards before compression: %d"%len(cards), file=sys.stderr)
+    print("Number of cards to delete: %d"%len(didxs), file=sys.stderr)
     for didx in didxs:
         try:
-            print didx
+            print(didx)
             if (cards[didx].DELETE):
                 cards.pop(didx)
-                print >>sys.stderr,"Deleting card index %d"%didx
+                print("Deleting card index %d"%didx, file=sys.stderr)
         except:
-            print >>sys.stderr,"DOH!  Not that index! %d"%didx
-    print >>sys.stderr,"Number of cards after compression: %d"%len(cards)
+            print("DOH!  Not that index! %d"%didx, file=sys.stderr)
+    print("Number of cards after compression: %d"%len(cards), file=sys.stderr)
     return cards
 
 cards = []

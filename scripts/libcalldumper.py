@@ -8,7 +8,7 @@ currently a toy.  Not for general consumption
 
 
 if len(argv) == 1:
-    print ("Syntax:   $ %s <programpath>"%argv[0])
+    print(("Syntax:   $ %s <programpath>"%argv[0]))
     exit(1)
     
 
@@ -40,13 +40,13 @@ class LibraryNotifier(vtrace.Notifier):
     def notify(self, event, trace):
         if event == vtrace.NOTIFY_LOAD_LIBRARY:
             lib = trace.getMeta("LatestLibrary")
-            print "-----Library Loaded:",lib
+            print("-----Library Loaded:",lib)
             self.addBreaksForLib(trace, lib)
 
     def addBreaksForLib(self, me, lib):
         for sym in me.getSymsForFile(lib):
             if sym.stype == 2 and sym.value != 0:
-                print ("setting breakpoint at %s:%s (%x)"%(lib, sym.name, sym.value))
+                print(("setting breakpoint at %s:%s (%x)"%(lib, sym.name, sym.value)))
                 bp = LibcallBreakpoint(sym)
                 me.addBreakpoint(bp)
 

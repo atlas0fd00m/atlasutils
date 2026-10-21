@@ -520,7 +520,7 @@ def findRET(trace, stackptr = 0):
                 #bytes just before the RET address(the opcode before, should be call)
                 buf = buffer(trace.readMemory(address-8, 24))
                 BUFLEN = 8
-                for x in xrange(BUFLEN,0,-1):
+                for x in range(BUFLEN,0,-1):
                     opchar = buf[x]
                     #stderr.write("  %x%x  "%(x,ord(opchar)))
                     if (opchar == '\xff' and (ord(buf[x+1])>>4) & 3 == 1) or opchar == '\xe8' or opchar == '\x9a':

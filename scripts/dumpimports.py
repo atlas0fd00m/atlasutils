@@ -22,7 +22,7 @@ def dumpImports(filename):
     try:
         vw.loadFromFile(filename)
     except:
-        print "%s not known executable format" % filename
+        print("%s not known executable format" % filename)
         return
 
     try:
@@ -51,8 +51,8 @@ def dumpImports(filename):
 
             symentry[filename] = symentry.get(filename, 0) + 1
 
-    except Exception, e:
-        print e
+    except Exception as e:
+        print(e)
 
 
 
