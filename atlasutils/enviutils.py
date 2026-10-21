@@ -2,7 +2,7 @@ import envi
 import envi.archs.i386 as e_i386
 import envi.archs.i386.opcode86 as i3op
 import envi.archs.amd64 as e_amd64
-import envi.archs.amd64.opcode86 as i64op
+import envi.archs.amd64.opcode64 as i64op
 
 
 

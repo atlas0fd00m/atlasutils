@@ -8,7 +8,7 @@ import subprocess
 import ctypes.util as cutil
 from ctypes import *
 
-from vivisect import L_LTYPE, LOC_IMPORT
+from vivisect.const import L_LTYPE, LOC_IMPORT
 
 lib = cutil.find_library("stdc++")
 

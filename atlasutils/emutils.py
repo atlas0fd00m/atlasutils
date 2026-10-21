@@ -4653,7 +4653,7 @@ def readMemString(self, va, maxlen=0xfffffff, wide=False):
 class SymbolikTraceAnalMon(vi_mon.AnalysisMonitor):
     def __init__(self, emu):
         self.emu = emu
-        self.sctx = vs_anal.getSymbolikAnalysContext(emu.vw)
+        self.sctx = vs_anal.getSymbolikAnalysisContext(emu.vw)
         self.xlate = self.sctx.getTranslator()
 
     def prehook(self, emu, op, starteip):
