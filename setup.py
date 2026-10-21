@@ -1,29 +1,14 @@
 import os
-import sys
-from setuptools import find_packages, setup
+from setuptools import setup
 
-VERSION = '3.1.0'
-desc = 'atlas\' hacking toolbelt full of toys'
-
-mods = []
-pkgdata = {'vivscripts': ['vivscripts/*']}
+# pyproject.toml is the source of truth for metadata and dependencies.
+# This setup.py is kept for backwards compatibility with older pip versions.
 
 scripts = []
-for s in os.listdir('scripts'):
-    if s != '.git':
-        scripts.append('scripts/%s'%s)
+scripts_dir = os.path.join(os.path.dirname(__file__), 'scripts')
+if os.path.isdir(scripts_dir):
+    for s in os.listdir(scripts_dir):
+        if s != '.git':
+            scripts.append('scripts/%s' % s)
 
-
-setup  (name        = 'atlasutils',
-        version     = VERSION,
-        description = desc,
-        long_description=desc,
-        long_description_content_type='text/markdown',
-        author = 'atlas of d00m',
-        author_email = 'atlas@r4780y.com',
-        url = 'https://github.com/atlas0fd00m/atlasutils',
-        packages = find_packages(),
-        package_data = pkgdata,
-        ext_modules = mods,
-        scripts = scripts
-       )
+setup(scripts=scripts)
