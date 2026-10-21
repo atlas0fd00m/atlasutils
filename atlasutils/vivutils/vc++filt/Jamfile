@@ -1,6 +1,0 @@
-StartJamfile TOP ;
-
-Main vc++filt :	main.cpp ;
-ExtraLibs vc++filt : dbghelp.lib ;
-
-EndJamfile TOP ;
